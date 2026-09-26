@@ -1,69 +1,40 @@
-# Implementation Plan: Product Location Breakdown & Warehouse Relocation Workflow
+# Implementation Plan: Weekly Personnel Activity Dashboard with Recharts
 
-Enable Inventory Managers to click on any product tag or name to view granular real-time stock levels remaining in each warehouse location/rack, and initiate quick internal relocations with full staff assignment (`Draft ➔ Ready ➔ Processing ➔ Done`).
-
----
-
-## 1. User Experience & Architecture Overview
-
-### A. Clickable Product Tags & Location Stock Breakdown
-- When a manager or warehouse operator clicks on a product row, product tag, or the "Locations" action pill in `ProductsView`:
-  - Opens the **Product Location Breakdown & Inventory Drawer / Modal**.
-  - Displays:
-    - Product SKU, Category, UoM, Cost & Sale Price, and total On-Hand / Free-to-Use.
-    - Clean table and visual cards showing **Stock Remaining by Location / Rack**:
-      - Location Name, Warehouse, Code, Location Type (Internal storage, Production Floor, Packing Bay, etc.).
-      - Physical on-hand quantity, reserved units, and available free-to-use units.
-      - Visual capacity and stock badge indicators (In Stock, Low Stock, Empty).
-
-### B. Quick Relocation Action Inside Product Details
-- Inside the product location modal, provide a prominent **"Transfer / Relocate Stock"** action button.
-- Selecting it opens an integrated **Internal Relocation Wizard**:
-  - **Source Location**: Pre-filtered to locations holding available stock of this product (with available balance shown).
-  - **Destination Location**: Dropdown of target racks / storage zones across warehouses.
-  - **Transfer Quantity**: Numeric input with validation (cannot exceed source available on-hand).
-  - **Assigned Warehouse Employee**: Dropdown of active warehouse staff with their current workload/role.
-  - **Scheduled Date & Relocation Notes**: Optional reference for special handling or priority.
-
-### C. Workflow & Employee Assignment Logic
-- Clicking **"Create Relocation Order & Assign"**:
-  - Creates a PostgreSQL internal transfer operation (`operationType: 'internal'`).
-  - Sets the operation status directly to `'ready'` (or `'draft'` with assigned operator ready to execute).
-  - The assigned employee immediately sees this relocation order in their active task queue (`Floor Task Mode`).
-  - When the employee validates the task (`Done`), stock is safely deducted from the source location, credited to the destination rack in PostgreSQL `stock_levels`, and recorded in `stock_ledger`.
-  - Also provide an option to switch directly to `OperationsView` to track the task in the Kanban pipeline.
+Add an interactive dual-axis visualization dashboard component to the **Personnel Activity** tab in `SettingsView`, plotting weekly completed operations (as bar columns) against error/exception rates (as a line trend) per warehouse staff member.
 
 ---
 
-## 2. Technical Modifications
-
-### 1. Backend (`src/db/queries.ts` & API routes)
-- Ensure internal transfer validation validates stock sufficiency at the source location before decrementing (prevent negative stock).
-- Verify that `createOperation` and `updateOperationStatus` properly handle assigned staff information and notes for internal transfers.
-
-### 2. Frontend Components (`src/views/ProductsView.tsx`)
-- Make the product name / tag clickable in the product table to open the detailed Location Breakdown modal directly.
-- Upgrade the **Stock per Location Modal** with:
-  - Richer location metadata (Warehouse name, short code, location type, capacity status).
-  - Row-level "Relocate from this rack" quick buttons.
-  - An inline / nested **Quick Relocation & Staff Assignment Form**:
-    - Product pre-selected.
-    - Source location selection with live balance.
-    - Destination location selection.
-    - Employee picker populated with warehouse personnel (`api.getEmployees`).
-    - Validation feedback (errors for insufficient balance, unassigned staff, or same source & destination).
-    - Success confirmation with direct link to view the order in Operations Kanban.
-
-### 3. Navigation & Cross-View Linking
-- Support opening the internal transfer in `OperationsView` if the manager clicks "View in Operations Pipeline".
+## 1. Package Installation
+- Install `recharts` package via `install_applet_package`.
 
 ---
 
-## 3. Verification & Testing Steps
-1. Navigate to **Products** as Manager.
-2. Click on a product name / tag (e.g. *Acoustic Wall Panel* or *Desk Chair*).
-3. Verify that the modal displays all warehouse racks with remaining stock and reserved amounts.
-4. Click **"Relocate Stock"** (or click the quick transfer button next to a specific rack).
-5. Select destination rack, enter quantity, and choose an assigned warehouse staff member.
-6. Submit the relocation; verify the operation is created in `ready` state assigned to the employee.
-7. Switch to Staff view or validate the relocation; verify stock levels update accurately across both locations in PostgreSQL and appear in the stock ledger.
+## 2. Weekly Trend Aggregator Logic
+- Aggregate operation records over the chosen time window (Default: **Last 4 weeks**, with toggles for 4, 8, or 12 weeks).
+- Bucket tasks into ISO weekly intervals (`Week 1`, `Week 2`, `Week 3`, `Week 4`, etc., with dates).
+- For each week:
+  - Total completed operations count (Receipts, Deliveries, Internal Moves, Adjustments).
+  - Exception/Error count (waiting on stock shortages, cancellations, discrepancies).
+  - Calculated Error Rate % (`(exceptions / total) * 100`).
+- Support filtering by:
+  - **All Personnel** (aggregate warehouse team throughput vs. team error rate).
+  - **Individual Staff Member** (e.g., Deva, Prathaban, Floor Operators) to evaluate individual weekly trajectories.
+
+---
+
+## 3. Dashboard UI Component (`src/components/PersonnelActivityChart.tsx` or inline in `SettingsView.tsx`)
+- **Dual-Axis Combo Chart**:
+  - `ResponsiveContainer` with `ComposedChart`.
+  - **Left Y-Axis**: Completed Operations count (Bar format, branded primary `#1E40AF` / `#3B82F6` with subtle rounded top).
+  - **Right Y-Axis**: Error Rate % (0% to 100% or auto-scaled, plotted with a bold alert Line `#EF4444` and dot indicators).
+  - **X-Axis**: Week labels (e.g., `Wk 35 (Sep 1 - 7)`).
+  - **Custom Tooltip**: Formatted with operations count, exceptions, and exact error percentage.
+  - **Quick Metric Badges**: Showing 4-week trend (e.g., "Throughput +12%", "Error Rate -3.5%").
+  - Time range selector (Last 4 Weeks, Last 8 Weeks, Last 12 Weeks).
+
+---
+
+## 4. Verification Plan
+- Install `recharts` and run `lint_applet` & `compile_applet`.
+- Verify the chart renders smoothly in both Light and Dark mode without layout shifts.
+- Verify changing the staff filter or week range updates the chart dynamically.
