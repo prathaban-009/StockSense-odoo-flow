@@ -899,36 +899,38 @@ export async function validateOperation(id: number) {
         });
       }
     } else if (op.operationType === 'delivery') {
-      // Outgoing Goods: Stock decreases from sourceLocationId
-      const srcLocId = op.sourceLocationId || 1;
-
-      // Verify stock availability
+      // Outgoing Goods: Stock decreases from each line's designated source pick location
+      // 1. Verify stock availability across all line items first
       for (const line of op.lines) {
+        const lineSrcLocId = line.sourceLocationId || op.sourceLocationId || 1;
         const existingStock = await db.select().from(stockLevels)
-          .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, srcLocId)))
+          .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, lineSrcLocId)))
           .limit(1);
 
         const currentOnHand = existingStock.length ? existingStock[0].onHand : 0;
+        const locName = locMap.get(lineSrcLocId) || `Location #${lineSrcLocId}`;
+
         if (currentOnHand < line.demandQty) {
-          // Mark as waiting for stock
+          // Block completion and mark as waiting for stock
           await db.update(operations).set({ status: 'waiting', updatedAt: new Date() }).where(eq(operations.id, id));
           return {
             success: false,
-            message: `Insufficient stock for ${line.productName}. On hand: ${currentOnHand}, Demanded: ${line.demandQty}. Operation set to 'Waiting'.`,
+            message: `Insufficient stock for '${line.productName}' at ${locName}. On-hand: ${currentOnHand} ${line.productUom || 'Units'}, Demanded: ${line.demandQty}. Operation ${op.reference} moved to 'Waiting'.`,
             operation: await getOperationById(id),
           };
         }
       }
 
-      // If all lines have sufficient stock, deduct
+      // 2. All lines have sufficient stock, deduct and record in ledger
       for (const line of op.lines) {
+        const lineSrcLocId = line.sourceLocationId || op.sourceLocationId || 1;
         const existingStock = await db.select().from(stockLevels)
-          .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, srcLocId)))
+          .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, lineSrcLocId)))
           .limit(1);
 
         const currentStock = existingStock[0];
         const newOnHand = Math.max(0, currentStock.onHand - line.demandQty);
-        const newReserved = Math.max(0, currentStock.reserved - line.demandQty);
+        const newReserved = Math.max(0, (currentStock.reserved || 0) - line.demandQty);
 
         await db.update(stockLevels)
           .set({
@@ -940,13 +942,13 @@ export async function validateOperation(id: number) {
 
         await db.update(operationLines).set({ doneQty: line.demandQty }).where(eq(operationLines.id, line.id));
 
-        // Log in stock ledger
+        // Log movement in stock ledger with exact source pick rack
         await db.insert(stockLedger).values({
           reference: op.reference,
           operationType: 'delivery',
           productId: line.productId,
-          fromLocation: locMap.get(srcLocId) || 'WH/Stock1',
-          toLocation: op.contact || 'Customer',
+          fromLocation: locMap.get(lineSrcLocId) || 'WH/Stock1',
+          toLocation: op.contact || 'Customer Delivery',
           contact: op.contact,
           quantity: line.demandQty,
           status: 'done',
@@ -958,10 +960,34 @@ export async function validateOperation(id: number) {
       const srcLocId = op.sourceLocationId || 1;
       const dstLocId = op.destLocationId || 3; // e.g. Production Floor
 
+      // 1. Verify availability at source location
       for (const line of op.lines) {
+        const lineSrcId = line.sourceLocationId || srcLocId;
+        const srcStock = await db.select().from(stockLevels)
+          .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, lineSrcId)))
+          .limit(1);
+
+        const currentOnHand = srcStock.length ? srcStock[0].onHand : 0;
+        const srcName = locMap.get(lineSrcId) || `Location #${lineSrcId}`;
+
+        if (currentOnHand < line.demandQty) {
+          await db.update(operations).set({ status: 'waiting', updatedAt: new Date() }).where(eq(operations.id, id));
+          return {
+            success: false,
+            message: `Insufficient stock for '${line.productName}' at source ${srcName}. Available: ${currentOnHand}, Demanded: ${line.demandQty}. Operation ${op.reference} moved to 'Waiting'.`,
+            operation: await getOperationById(id),
+          };
+        }
+      }
+
+      // 2. Perform transfer deduction and addition
+      for (const line of op.lines) {
+        const lineSrcId = line.sourceLocationId || srcLocId;
+        const lineDstId = line.destLocationId || dstLocId;
+
         // Deduct from source
         const srcStock = await db.select().from(stockLevels)
-          .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, srcLocId)))
+          .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, lineSrcId)))
           .limit(1);
 
         if (srcStock.length) {
@@ -972,7 +998,7 @@ export async function validateOperation(id: number) {
 
         // Add to dest
         const dstStock = await db.select().from(stockLevels)
-          .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, dstLocId)))
+          .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, lineDstId)))
           .limit(1);
 
         if (dstStock.length) {
@@ -982,7 +1008,7 @@ export async function validateOperation(id: number) {
         } else {
           await db.insert(stockLevels).values({
             productId: line.productId,
-            locationId: dstLocId,
+            locationId: lineDstId,
             onHand: line.demandQty,
             reserved: 0,
           });
@@ -995,9 +1021,9 @@ export async function validateOperation(id: number) {
           reference: op.reference,
           operationType: 'internal',
           productId: line.productId,
-          fromLocation: locMap.get(srcLocId) || 'Source',
-          toLocation: locMap.get(dstLocId) || 'Destination',
-          contact: op.contact || 'Internal Transfer',
+          fromLocation: locMap.get(lineSrcId) || 'Source',
+          toLocation: locMap.get(lineDstId) || 'Destination',
+          contact: op.contact || 'Internal Relocation',
           quantity: line.demandQty,
           status: 'done',
           date: todayStr,

@@ -14,14 +14,18 @@ import {
   HardHat,
   EyeOff,
   Mail,
+  ArrowRightLeft,
+  ArrowRight,
+  UserCheck,
+  CheckCircle2,
 } from 'lucide-react';
 import { api } from '../services/api.ts';
-import { Location, Product, ProductCategory } from '../types.ts';
+import { Location, Product, ProductCategory, Employee } from '../types.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 
 interface ProductsViewProps {
   initialFilter?: string;
-  onNavigateToOperations?: (type?: string) => void;
+  onNavigateToOperations?: (type?: string, status?: string) => void;
 }
 
 export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNavigateToOperations }) => {
@@ -31,6 +35,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -40,8 +45,19 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewStockProduct, setViewStockProduct] = useState<Product | null>(null);
+  const [relocateProduct, setRelocateProduct] = useState<Product | null>(null);
   const [downloaded, setDownloaded] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+
+  // Relocation Form State
+  const [relocateSourceLocId, setRelocateSourceLocId] = useState<number | undefined>(undefined);
+  const [relocateDestLocId, setRelocateDestLocId] = useState<number | undefined>(undefined);
+  const [relocateQty, setRelocateQty] = useState<number>(1);
+  const [relocateStaff, setRelocateStaff] = useState<string>('');
+  const [relocateNotes, setRelocateNotes] = useState<string>('');
+  const [relocateLoading, setRelocateLoading] = useState(false);
+  const [relocateSuccess, setRelocateSuccess] = useState<string | null>(null);
+  const [relocateError, setRelocateError] = useState<string | null>(null);
 
   // New product form state
   const [name, setName] = useState('');
@@ -65,19 +81,26 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
 
   const loadData = async () => {
     try {
-      const [prodsData, catsData, locsData] = await Promise.all([
+      const [prodsData, catsData, locsData, empsData] = await Promise.all([
         api.getProducts(),
         api.getCategories(),
         api.getLocations(),
+        api.getEmployees(),
       ]);
       setProducts(prodsData);
       setCategories(catsData);
       setLocations(locsData);
+      setEmployees(empsData);
+
       if (!initialLocationId && locsData.length > 0) {
         setInitialLocationId(locsData[0].id);
       }
       if (!categoryId && catsData.length > 0) {
         setCategoryId(catsData[0].id);
+      }
+      if (!relocateStaff && empsData.length > 0) {
+        const staff = empsData.find((e) => e.role === 'Warehouse Staff');
+        setRelocateStaff(staff ? staff.name : empsData[0].name);
       }
     } catch (err) {
       console.error('Failed to load products:', err);
@@ -144,7 +167,86 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
       setFormLoading(false);
     }
   };
+  const handleOpenRelocate = (prod: Product, preferredSrcLocId?: number) => {
+    setRelocateProduct(prod);
+    setRelocateError(null);
+    setRelocateSuccess(null);
 
+    // Find location with highest on-hand stock or the requested preferred location
+    const nonZeroLocs = (prod.stockPerLocation || []).filter((s) => s.onHand > 0);
+    const defaultSrc = preferredSrcLocId || (nonZeroLocs.length > 0 ? nonZeroLocs[0].locationId : locations[0]?.id || 1);
+    setRelocateSourceLocId(defaultSrc);
+
+    // Default destination: first warehouse location different from source
+    const destCandidate = locations.find((l) => l.id !== defaultSrc && l.locationType === 'internal') || locations.find((l) => l.id !== defaultSrc) || locations[0];
+    setRelocateDestLocId(destCandidate?.id);
+
+    const srcStock = prod.stockPerLocation?.find((s) => s.locationId === defaultSrc)?.onHand || 0;
+    setRelocateQty(srcStock > 0 ? Math.min(5, srcStock) : 1);
+    setRelocateNotes(`Manager requested relocation for ${prod.name} [${prod.sku}]`);
+  };
+
+  const handleCreateRelocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!relocateProduct || !relocateSourceLocId || !relocateDestLocId) return;
+
+    if (relocateSourceLocId === relocateDestLocId) {
+      setRelocateError('Source and Destination locations must be different.');
+      return;
+    }
+
+    const availableAtSrc = relocateProduct.stockPerLocation?.find((s) => s.locationId === relocateSourceLocId)?.onHand ?? 0;
+    if (relocateQty > availableAtSrc) {
+      setRelocateError(`Cannot move ${relocateQty} ${relocateProduct.uom}. Only ${availableAtSrc} available at selected source rack.`);
+      return;
+    }
+
+    setRelocateLoading(true);
+    setRelocateError(null);
+
+    try {
+      const srcLoc = locations.find((l) => l.id === relocateSourceLocId);
+      const dstLoc = locations.find((l) => l.id === relocateDestLocId);
+
+      // Create internal transfer operation in Draft status with staff assigned
+      const newOp = await api.createOperation({
+        operationType: 'internal',
+        contact: `Relocation: ${srcLoc?.shortCode || 'SRC'} ➔ ${dstLoc?.shortCode || 'DST'}`,
+        sourceLocationId: relocateSourceLocId,
+        destLocationId: relocateDestLocId,
+        scheduledDate: new Date().toISOString().split('T')[0],
+        responsible: relocateStaff || user?.name || 'Warehouse Staff',
+        notes: relocateNotes || `Relocate ${relocateQty} ${relocateProduct.uom} of ${relocateProduct.name}`,
+        lines: [
+          {
+            productId: relocateProduct.id,
+            demandQty: Number(relocateQty),
+            doneQty: 0,
+            sourceLocationId: relocateSourceLocId,
+            destLocationId: relocateDestLocId,
+          },
+        ],
+      });
+
+      // Advance directly to 'ready' stage so it lands in the assigned staff member's active task queue
+      await api.updateOperationStatus(newOp.id, 'ready', {
+        name: relocateStaff || user?.name || 'Warehouse Staff',
+      });
+
+      setRelocateSuccess(
+        `Relocation ${newOp.reference} scheduled & assigned to ${relocateStaff}! Available in Operations queue.`
+      );
+      await loadData();
+      setTimeout(() => {
+        setRelocateProduct(null);
+        setRelocateSuccess(null);
+      }, 2000);
+    } catch (err: any) {
+      setRelocateError(err.message || 'Failed to dispatch relocation order');
+    } finally {
+      setRelocateLoading(false);
+    }
+  };
   const filteredProducts = products.filter((p) => {
     if (filterLowStockOnly && p.onHand > (p.minReorderLevel ?? 10)) return false;
     if (selectedCategory !== 'all' && String(p.categoryId) !== selectedCategory) return false;
@@ -522,9 +624,13 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
                       className="hover:bg-blue-50/20 dark:hover:bg-slate-800/40 transition-colors"
                     >
                       <td className="py-3.5 px-4 sm:px-5">
-                        <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                          <Package className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{p.name}</span>
+                        <div
+                          onClick={() => setViewStockProduct(p)}
+                          className="font-semibold text-slate-900 dark:text-white flex items-center gap-2 cursor-pointer hover:text-[#1E40AF] dark:hover:text-blue-400 group transition-colors"
+                          title="Click product tag to view location stock breakdown"
+                        >
+                          <Package className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#1E40AF] dark:group-hover:text-blue-400 shrink-0 transition-colors" />
+                          <span className="underline-offset-2 group-hover:underline">{p.name}</span>
                           {isLow && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                               Low Stock
@@ -536,7 +642,13 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
                         )}
                       </td>
                       <td className="py-3.5 px-4 sm:px-5 font-mono font-medium text-slate-600 dark:text-slate-300">
-                        {p.sku}
+                        <button
+                          onClick={() => setViewStockProduct(p)}
+                          className="hover:text-[#1E40AF] dark:hover:text-blue-400 hover:underline cursor-pointer font-bold"
+                          title="View location breakdown for this SKU"
+                        >
+                          {p.sku}
+                        </button>
                       </td>
                       <td className="py-3.5 px-4 sm:px-5 text-slate-600 dark:text-slate-400">
                         {p.categoryName || 'Uncategorized'}
@@ -567,9 +679,13 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
                       )}
 
                       <td className="py-3.5 px-4 sm:px-5 text-right font-mono tabular-nums font-bold text-slate-900 dark:text-white">
-                        <span className={isLow ? 'text-amber-600 dark:text-amber-400' : ''}>
+                        <button
+                          onClick={() => setViewStockProduct(p)}
+                          className={`hover:underline cursor-pointer ${isLow ? 'text-amber-600 dark:text-amber-400' : ''}`}
+                          title="Click to see on-hand stock per location"
+                        >
                           {p.onHand}
-                        </span>
+                        </button>
                       </td>
                       <td className="py-3.5 px-4 sm:px-5 text-right font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400">
                         {p.freeToUse}
@@ -581,19 +697,30 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => setViewStockProduct(p)}
-                            className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-950/60 hover:text-[#1E40AF] text-slate-700 dark:text-slate-300 rounded text-xs font-medium transition-colors cursor-pointer border border-[#E2E8F0] dark:border-slate-700/80"
+                            className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-950/60 hover:text-[#1E40AF] text-slate-700 dark:text-slate-300 rounded text-xs font-medium transition-colors cursor-pointer border border-[#E2E8F0] dark:border-slate-700/80 flex items-center gap-1"
                             title="Stock availability per location"
                           >
-                            Locations
+                            <Building2 className="w-3 h-3 text-slate-400" />
+                            <span>Locations</span>
                           </button>
                           {!isStaff && (
-                            <button
-                              onClick={() => setEditingProduct(p)}
-                              className="p-1 text-slate-400 hover:text-[#1E40AF] dark:hover:text-blue-300 rounded cursor-pointer transition-colors"
-                              title="Edit Product"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleOpenRelocate(p)}
+                                className="px-2 py-1 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-[#1E40AF] dark:text-blue-300 rounded text-xs font-medium transition-colors cursor-pointer border border-blue-200 dark:border-blue-800/80 flex items-center gap-1"
+                                title="Relocate product between warehouse racks"
+                              >
+                                <ArrowRightLeft className="w-3 h-3" />
+                                <span className="hidden sm:inline">Relocate</span>
+                              </button>
+                              <button
+                                onClick={() => setEditingProduct(p)}
+                                className="p-1 text-slate-400 hover:text-[#1E40AF] dark:hover:text-blue-300 rounded cursor-pointer transition-colors"
+                                title="Edit Product"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>
@@ -915,22 +1042,39 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
                   const onHand = match?.onHand ?? 0;
                   const reserved = match?.reserved ?? 0;
                   return (
-                    <div key={loc.id} className="p-3 flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-slate-900 dark:text-white flex items-center gap-1.5">
-                          <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                          {loc.name}
+                    <div key={loc.id} className="p-3 flex items-center justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-slate-900 dark:text-white flex items-center gap-1.5 truncate">
+                          <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">{loc.name}</span>
                         </p>
                         <p className="text-[11px] text-slate-400">
                           {loc.shortCode} · {loc.locationType}
                         </p>
                       </div>
-                      <div className="text-right">
-                        <span className="font-mono font-semibold text-slate-900 dark:text-white block tabular-nums">
-                          {onHand} {viewStockProduct.uom}
-                        </span>
-                        {reserved > 0 && (
-                          <span className="text-[11px] text-amber-600 dark:text-amber-400 block tabular-nums">({reserved} reserved)</span>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <div className="text-right">
+                          <span className="font-mono font-semibold text-slate-900 dark:text-white block tabular-nums">
+                            {onHand} {viewStockProduct.uom}
+                          </span>
+                          {reserved > 0 && (
+                            <span className="text-[11px] text-amber-600 dark:text-amber-400 block tabular-nums">({reserved} reserved)</span>
+                          )}
+                        </div>
+                        {!isStaff && onHand > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const prodToMove = viewStockProduct;
+                              setViewStockProduct(null);
+                              handleOpenRelocate(prodToMove, loc.id);
+                            }}
+                            className="px-2 py-1 bg-blue-50 dark:bg-blue-950/60 hover:bg-[#1E40AF] text-[#1E40AF] hover:text-white dark:text-blue-300 rounded text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer border border-blue-200 dark:border-blue-800"
+                            title={`Relocate stock from ${loc.name}`}
+                          >
+                            <ArrowRightLeft className="w-3 h-3" />
+                            <span>Move</span>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -939,14 +1083,245 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
               </div>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-[#E2E8F0] dark:border-slate-800 text-right">
+            {/* Embedded Quick Relocation Panel for Manager */}
+            {!isStaff && viewStockProduct.onHand > 0 && (
+              <div className="pt-3 border-t border-[#E2E8F0] dark:border-slate-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <ArrowRightLeft className="w-3.5 h-3.5 text-[#1E40AF] dark:text-blue-400" />
+                    <span>Quick Relocate Stock</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const prodToMove = viewStockProduct;
+                      setViewStockProduct(null);
+                      handleOpenRelocate(prodToMove);
+                    }}
+                    className="text-[11px] font-semibold text-[#1E40AF] dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <span>Open Full Dispatch Modal</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="p-3 bg-blue-50/50 dark:bg-blue-950/30 rounded-md border border-blue-200 dark:border-blue-900/60 text-xs space-y-2.5">
+                  <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                    Need to rebalance physical bins? Select source/destination locations, specify quantities, and assign a floor operator directly.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const prodToMove = viewStockProduct;
+                        setViewStockProduct(null);
+                        handleOpenRelocate(prodToMove);
+                      }}
+                      className="w-full py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>Initiate Transfer &amp; Assign Staff</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 pt-3 border-t border-[#E2E8F0] dark:border-slate-800 flex items-center justify-between">
+              <span className="text-[11px] text-slate-500 font-mono">
+                Total Stock: <strong>{viewStockProduct.onHand}</strong> {viewStockProduct.uom}
+              </span>
               <button
                 onClick={() => setViewStockProduct(null)}
-                className="px-4 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md text-xs font-medium cursor-pointer shadow-xs"
+                className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-md text-xs font-medium cursor-pointer"
               >
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* QUICK PRODUCT RELOCATION MODAL (Manager to Employee Assignment) */}
+      {relocateProduct && !isStaff && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="w-full max-w-lg bg-white dark:bg-[#0F172A] rounded-lg shadow-xl border border-[#E2E8F0] dark:border-slate-800 overflow-hidden my-6">
+            <div className="bg-[#1E40AF] text-white p-4 flex justify-between items-center">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ArrowRightLeft className="w-4 h-4 text-blue-200" />
+                  <h3 className="text-sm font-semibold">Relocate Stock Between Warehouse Locations</h3>
+                </div>
+                <p className="text-xs text-blue-200 mt-0.5">
+                  {relocateProduct.name} <span className="font-mono">[{relocateProduct.sku}]</span>
+                </p>
+              </div>
+              <button
+                onClick={() => setRelocateProduct(null)}
+                className="text-blue-200 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateRelocation} className="p-5 space-y-4 text-xs">
+              {relocateError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-850 rounded-md text-rose-700 dark:text-rose-300 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold block">Relocation Error</span>
+                    <span>{relocateError}</span>
+                  </div>
+                </div>
+              )}
+
+              {relocateSuccess && (
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-md text-emerald-800 dark:text-emerald-300 flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{relocateSuccess}</span>
+                </div>
+              )}
+
+              {/* Source & Destination Location Selectors */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Source Rack / Location
+                  </label>
+                  <select
+                    value={relocateSourceLocId}
+                    onChange={(e) => {
+                      const nextSrc = Number(e.target.value);
+                      setRelocateSourceLocId(nextSrc);
+                      const avail = relocateProduct.stockPerLocation?.find((s) => s.locationId === nextSrc)?.onHand || 0;
+                      if (relocateQty > avail && avail > 0) setRelocateQty(avail);
+                    }}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md dark:text-white font-mono text-xs focus:ring-1 focus:ring-[#1E40AF]"
+                  >
+                    {locations.map((loc) => {
+                      const locStock = relocateProduct.stockPerLocation?.find((s) => s.locationId === loc.id)?.onHand ?? 0;
+                      return (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name} ({loc.shortCode}) — On-hand: {locStock}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                    Available: {relocateProduct.stockPerLocation?.find((s) => s.locationId === relocateSourceLocId)?.onHand ?? 0} {relocateProduct.uom}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Destination Rack / Location
+                  </label>
+                  <select
+                    value={relocateDestLocId}
+                    onChange={(e) => setRelocateDestLocId(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md dark:text-white font-mono text-xs focus:ring-1 focus:ring-[#1E40AF]"
+                  >
+                    {locations.map((loc) => (
+                      <option key={loc.id} value={loc.id} disabled={loc.id === relocateSourceLocId}>
+                        {loc.name} ({loc.shortCode}) {loc.id === relocateSourceLocId ? '(Source)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-slate-400 mt-1">Target warehouse placement</p>
+                </div>
+              </div>
+
+              {/* Quantity to Move */}
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Quantity to Relocate ({relocateProduct.uom})
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max={relocateProduct.stockPerLocation?.find((s) => s.locationId === relocateSourceLocId)?.onHand || 9999}
+                    value={relocateQty}
+                    onChange={(e) => setRelocateQty(Math.max(1, Number(e.target.value)))}
+                    className="w-32 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md dark:text-white font-mono font-bold text-center focus:ring-1 focus:ring-[#1E40AF]"
+                  />
+                  <span className="text-slate-500 font-medium">{relocateProduct.uom}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const maxAvail = relocateProduct.stockPerLocation?.find((s) => s.locationId === relocateSourceLocId)?.onHand || 1;
+                      setRelocateQty(maxAvail);
+                    }}
+                    className="text-xs text-[#1E40AF] dark:text-blue-400 hover:underline font-semibold cursor-pointer"
+                  >
+                    Move All Available
+                  </button>
+                </div>
+              </div>
+
+              {/* Assign Warehouse Employee */}
+              <div className="p-3.5 bg-blue-50/60 dark:bg-blue-950/30 rounded-md border border-blue-200 dark:border-blue-900/60 space-y-2">
+                <label className="block font-semibold text-[#1E40AF] dark:text-blue-300 flex items-center gap-1.5">
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Assign Warehouse Floor Staff Member</span>
+                </label>
+                <select
+                  value={relocateStaff}
+                  onChange={(e) => setRelocateStaff(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-800 rounded-md dark:text-white text-xs font-medium focus:ring-1 focus:ring-[#1E40AF]"
+                >
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.name}>
+                      {emp.name} — {emp.role} {emp.activeTasksCount ? `(${emp.activeTasksCount} active tasks)` : ''}
+                    </option>
+                  ))}
+                  {employees.length === 0 && (
+                    <option value="Warehouse Staff">Warehouse Staff (Default Operator)</option>
+                  )}
+                </select>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  This internal transfer will be scheduled in <strong>Ready (Assigned)</strong> state and will immediately appear in this operator&apos;s active floor queue for physical execution.
+                </p>
+              </div>
+
+              {/* Instructions / Notes */}
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Floor Movement Instructions
+                </label>
+                <input
+                  type="text"
+                  value={relocateNotes}
+                  onChange={(e) => setRelocateNotes(e.target.value)}
+                  placeholder="e.g. Move pallet to Bay 2 for staging..."
+                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md dark:text-white focus:ring-1 focus:ring-[#1E40AF]"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 pt-2 border-t border-[#E2E8F0] dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setRelocateProduct(null)}
+                  className="flex-1 py-2 font-medium border border-[#E2E8F0] dark:border-slate-700 rounded-md text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={relocateLoading}
+                  className="flex-1 py-2 font-semibold bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md transition-colors cursor-pointer shadow-xs disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  {relocateLoading ? (
+                    <span>Scheduling Relocation...</span>
+                  ) : (
+                    <>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      <span>Dispatch Relocation Task</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

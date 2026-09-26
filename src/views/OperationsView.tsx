@@ -407,6 +407,13 @@ export const OperationsView: React.FC<OperationsViewProps> = ({
             <span>Draft</span>
           </span>
         );
+      case 'waiting':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+            <span>Waiting Stock</span>
+          </span>
+        );
       case 'canceled':
         return (
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400">
@@ -645,7 +652,7 @@ export const OperationsView: React.FC<OperationsViewProps> = ({
       {/* Filter & Search Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-md border border-[#E2E8F0] dark:border-slate-700/80 overflow-x-auto">
-          {(['all', 'draft', 'ready', 'processing', 'done'] as const).map((s) => (
+          {(['all', 'draft', 'ready', 'processing', 'waiting', 'done'] as const).map((s) => (
             <button
               key={s}
               onClick={() => setActiveStatus(s)}
@@ -655,7 +662,7 @@ export const OperationsView: React.FC<OperationsViewProps> = ({
                   : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              {s === 'done' ? 'Completed' : s === 'ready' ? 'Ready (Assigned)' : s}
+              {s === 'done' ? 'Completed' : s === 'ready' ? 'Ready (Assigned)' : s === 'waiting' ? 'Waiting Stock' : s}
             </button>
           ))}
         </div>
@@ -790,8 +797,8 @@ export const OperationsView: React.FC<OperationsViewProps> = ({
 
       {/* KANBAN BOARD VIEW */}
       {viewMode === 'kanban' && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {(['draft', 'ready', 'processing', 'done'] as const).map((stage) => {
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3.5">
+          {(['draft', 'ready', 'processing', 'waiting', 'done'] as const).map((stage) => {
             const stageOps = filteredOps.filter((op) => op.status === stage);
             return (
               <div
@@ -800,7 +807,7 @@ export const OperationsView: React.FC<OperationsViewProps> = ({
               >
                 <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-[#E2E8F0] dark:border-slate-800 px-1">
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                    {stage === 'done' ? 'Completed' : stage === 'ready' ? 'Ready (Assigned)' : stage}
+                    {stage === 'done' ? 'Completed' : stage === 'ready' ? 'Ready (Assigned)' : stage === 'waiting' ? 'Waiting Stock' : stage}
                   </span>
                   <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-[11px] font-mono rounded text-slate-600 dark:text-slate-300 border border-[#E2E8F0] dark:border-slate-700 font-semibold">
                     {stageOps.length}
@@ -958,9 +965,30 @@ export const OperationsView: React.FC<OperationsViewProps> = ({
                     <span>
                       {activeOp.operationType === 'adjustment'
                         ? 'Sign-off & Commit Stock Adjustment to PostgreSQL'
+                        : activeOp.operationType === 'delivery'
+                        ? 'Validate & Complete Delivery (Deduct Stock)'
                         : 'Validate All Lines & Commit to Stock'}
                     </span>
                   </button>
+                )}
+
+                {/* 3.5 WAITING STATE (Insufficient stock alert & retry) */}
+                {activeOp.status === 'waiting' && (
+                  <div className="flex items-center gap-2">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded text-amber-800 dark:text-amber-200 text-xs font-semibold">
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                      <span>Waiting for Stock Replenishment</span>
+                    </div>
+                    <button
+                      onClick={() => handleValidateOperation(activeOp.id)}
+                      disabled={actionLoading}
+                      className="px-3.5 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                      title="Re-check available stock levels and attempt delivery validation"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Re-check Stock &amp; Validate</span>
+                    </button>
+                  </div>
                 )}
 
                 {/* 4. DONE STATE (Completed confirmation) */}
@@ -1371,7 +1399,7 @@ export const OperationsView: React.FC<OperationsViewProps> = ({
                             )}
 
                             {activeType === 'delivery' && (
-                              <div className="flex-1 flex items-center gap-2">
+                              <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                                 <span className="text-[11px] text-slate-500 whitespace-nowrap">
                                   Source Pick Rack:
                                 </span>
@@ -1380,11 +1408,14 @@ export const OperationsView: React.FC<OperationsViewProps> = ({
                                   onChange={(e) => updateLine(idx, 'sourceLocationId', Number(e.target.value))}
                                   className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-[#E2E8F0] dark:border-slate-700 rounded text-xs dark:text-white font-mono"
                                 >
-                                  {locations.map((loc) => (
-                                    <option key={loc.id} value={loc.id}>
-                                      {loc.name} ({loc.shortCode})
-                                    </option>
-                                  ))}
+                                  {(internalWarehouseLocations.length > 0 ? internalWarehouseLocations : locations).map((loc) => {
+                                    const locStock = selectedProd?.stockPerLocation?.find((s) => s.locationId === loc.id)?.onHand ?? 0;
+                                    return (
+                                      <option key={loc.id} value={loc.id}>
+                                        {loc.name} ({loc.shortCode}) — On-hand: {locStock} {selectedProd?.uom || 'Units'}
+                                      </option>
+                                    );
+                                  })}
                                 </select>
                               </div>
                             )}
