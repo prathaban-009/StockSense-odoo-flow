@@ -111,6 +111,7 @@ export interface Operation {
   notes?: string;
   lines: OperationLine[];
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface StockLedgerItem {
@@ -154,4 +155,32 @@ export interface MailProviderPlan {
   status: string;
   recommendedFor: string;
   setupSteps: string[];
+}
+
+export interface StaffActivityRecord {
+  id: number;
+  reference: string;
+  operationType: OperationType;
+  responsible: string;
+  contact?: string;
+  status: OperationStatus;
+  linesCount: number;
+  totalQty: number;
+  createdAt: string;
+  updatedAt?: string;
+  scheduledDate?: string;
+  durationMinutes: number;
+  hasException: boolean;
+  exceptionReason?: string;
+}
+
+export interface StaffPerformanceSummary {
+  employeeName: string;
+  role: string;
+  totalTasks: number;
+  completedTasks: number;
+  activeTasks: number;
+  exceptionTasks: number;
+  errorRatePercent: number;
+  avgDurationMinutes: number;
 }
