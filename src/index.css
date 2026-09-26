@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --brand-primary: #1E40AF;
+    --brand-primary: #2563EB;
     --brand-primary-hover: #1D4ED8;
     --brand-sidebar-dark: #1E293B;
     --brand-bg-light: #F8FAFC;
@@ -24,6 +24,11 @@
   .dark body {
     background-color: var(--brand-bg-dark);
     color: #F8FAFC;
+  }
+
+  :where(button, a, input, select, textarea):focus-visible {
+    outline: 2px solid #60A5FA;
+    outline-offset: 2px;
   }
 }
 

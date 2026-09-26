@@ -69,11 +69,11 @@ export const LoginView: React.FC<LoginViewProps> = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-blue-600 selection:text-white">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-950 to-blue-950 text-slate-100 flex flex-col justify-between selection:bg-blue-600 selection:text-white">
       {/* Top Brand Bar */}
-      <header className="border-b border-slate-800/80 px-6 py-4 flex items-center justify-between bg-slate-900/60 backdrop-blur-md">
+      <header className="border-b border-slate-800/80 px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900/60 backdrop-blur-md">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-md bg-[#1E40AF] flex items-center justify-center text-white shadow-sm">
+          <div className="w-8 h-8 rounded-md bg-[#2563EB] flex items-center justify-center text-white shadow-sm">
             <Boxes className="w-4 h-4" />
           </div>
           <div>
@@ -92,7 +92,7 @@ export const LoginView: React.FC<LoginViewProps> = () => {
 
       {/* Main Form Centerpiece */}
       <main className="flex-1 flex items-center justify-center p-4 sm:p-6 my-auto">
-        <div className="w-full max-w-md bg-slate-900/90 rounded-xl border border-slate-800 shadow-2xl p-6 sm:p-8 backdrop-blur-lg">
+        <div className="w-full max-w-lg bg-slate-900/90 rounded-xl border border-blue-900/50 shadow-2xl p-6 sm:p-8 backdrop-blur-lg">
           {/* Header */}
           <div className="text-center mb-6">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
@@ -113,9 +113,9 @@ export const LoginView: React.FC<LoginViewProps> = () => {
                 setActiveTab('signin');
                 setError(null);
               }}
-              className={`flex-1 py-2 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+              className={`flex-1 min-h-10 py-2.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
                 activeTab === 'signin'
-                  ? 'bg-[#1E40AF] text-white shadow-sm'
+                  ? 'bg-[#2563EB] text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -127,9 +127,9 @@ export const LoginView: React.FC<LoginViewProps> = () => {
                 setActiveTab('register');
                 setError(null);
               }}
-              className={`flex-1 py-2 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+              className={`flex-1 min-h-10 py-2.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
                 activeTab === 'register'
-                  ? 'bg-[#1E40AF] text-white shadow-sm'
+                  ? 'bg-[#2563EB] text-white shadow-sm'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -172,7 +172,7 @@ export const LoginView: React.FC<LoginViewProps> = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@company.com"
-                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                   />
                 </div>
               </div>
@@ -196,7 +196,7 @@ export const LoginView: React.FC<LoginViewProps> = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                   />
                 </div>
               </div>
@@ -204,7 +204,7 @@ export const LoginView: React.FC<LoginViewProps> = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-md mt-2"
+                className="w-full min-h-11 py-3 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-md font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-md mt-2"
               >
                 {loading ? 'Authenticating...' : 'Sign In to Workspace'}
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -222,7 +222,7 @@ export const LoginView: React.FC<LoginViewProps> = () => {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Marcus Vance"
-                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                   />
                 </div>
               </div>
@@ -237,7 +237,7 @@ export const LoginView: React.FC<LoginViewProps> = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="manager@yourcompany.com"
-                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                   />
                 </div>
               </div>
@@ -252,7 +252,7 @@ export const LoginView: React.FC<LoginViewProps> = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Minimum 6 characters"
-                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-700 rounded-md text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                   />
                 </div>
               </div>
@@ -265,7 +265,7 @@ export const LoginView: React.FC<LoginViewProps> = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-md mt-2"
+                className="w-full min-h-11 py-3 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-md font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-md mt-2"
               >
                 {loading ? 'Creating Manager Account...' : 'Complete Manager Registration'}
                 <ArrowRight className="w-3.5 h-3.5" />
