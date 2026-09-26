@@ -194,8 +194,18 @@ export const MoveHistoryView: React.FC = () => {
               <tbody className="divide-y divide-[#E2E8F0] dark:divide-slate-800/80 text-slate-700 dark:text-slate-300">
                 {moves.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-400">
-                      No stock move records found in ledger.
+                    <td colSpan={8} className="py-16 text-center">
+                      <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-3">
+                          <History className="w-6 h-6" />
+                        </div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                          No Movements Recorded
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                          The ledger is completely clean. As floor operations confirm shelved goods, pick items, or transfer stock between racks, an immutable audit log will automatically record here.
+                        </p>
+                      </div>
                     </td>
                   </tr>
                 ) : (

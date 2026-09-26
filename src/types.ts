@@ -6,6 +6,22 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  canCreateReceipts?: boolean;
+  warehouseId?: number | null;
+  warehouseName?: string;
+}
+
+export interface Employee {
+  id: number;
+  uid: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  canCreateReceipts: boolean;
+  warehouseId?: number | null;
+  warehouseName?: string;
+  activeTasksCount?: number;
+  createdAt?: string;
 }
 
 export interface ProductCategory {
@@ -57,7 +73,7 @@ export interface Location {
 }
 
 export type OperationType = 'receipt' | 'delivery' | 'internal' | 'adjustment';
-export type OperationStatus = 'draft' | 'waiting' | 'ready' | 'done' | 'canceled';
+export type OperationStatus = 'draft' | 'waiting' | 'ready' | 'processing' | 'done' | 'canceled';
 
 export interface OperationLine {
   id?: number;
@@ -69,6 +85,11 @@ export interface OperationLine {
   costPrice?: string;
   demandQty: number;
   doneQty: number;
+  destLocationId?: number;
+  destLocationName?: string;
+  sourceLocationId?: number;
+  sourceLocationName?: string;
+  status?: 'pending' | 'done';
 }
 
 export interface Operation {
@@ -77,12 +98,16 @@ export interface Operation {
   operationType: OperationType;
   status: OperationStatus;
   contact?: string;
+  warehouseId?: number | null;
+  warehouseName?: string;
   sourceLocationId?: number | null;
   sourceLocationName?: string;
   destLocationId?: number | null;
   destLocationName?: string;
   scheduledDate?: string;
   responsible?: string;
+  assignedToId?: number | null;
+  assignedStaffName?: string;
   notes?: string;
   lines: OperationLine[];
   createdAt?: string;

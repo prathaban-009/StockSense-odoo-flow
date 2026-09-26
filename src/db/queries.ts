@@ -370,6 +370,34 @@ export async function createCategory(name: string, description?: string) {
   }
 }
 
+// Helper to parse metadata stored in notes
+interface OpMetadata {
+  userNotes: string;
+  warehouseId?: number | null;
+  lineLocations?: Record<number, number>;
+  assignedToId?: number | null;
+  assignedStaffName?: string | null;
+}
+
+function parseOpNotes(rawNotes: string | null): OpMetadata {
+  if (!rawNotes) return { userNotes: '' };
+  try {
+    if (rawNotes.startsWith('{') && rawNotes.endsWith('}')) {
+      const parsed = JSON.parse(rawNotes);
+      return {
+        userNotes: parsed.userNotes || '',
+        warehouseId: parsed.warehouseId || null,
+        lineLocations: parsed.lineLocations || {},
+        assignedToId: parsed.assignedToId || null,
+        assignedStaffName: parsed.assignedStaffName || null,
+      };
+    }
+  } catch (_e) {
+    // fallback to plain text
+  }
+  return { userNotes: rawNotes };
+}
+
 // ---------------- OPERATIONS QUERIES ----------------
 export async function getAllOperations(type?: string) {
   try {
@@ -405,12 +433,41 @@ export async function getAllOperations(type?: string) {
     const locs = await db.select().from(locations);
     const locMap = new Map(locs.map(l => [l.id, l.name]));
 
-    return ops.map(op => ({
-      ...op,
-      sourceLocationName: op.sourceLocationId ? locMap.get(op.sourceLocationId) || 'Unknown' : 'N/A',
-      destLocationName: op.destLocationId ? locMap.get(op.destLocationId) || 'Unknown' : 'N/A',
-      lines: allLines.filter(l => l.operationId === op.id),
-    }));
+    const whs = await db.select().from(warehouses);
+    const whMap = new Map(whs.map(w => [w.id, w.name]));
+
+    return ops.map(op => {
+      const meta = parseOpNotes(op.notes);
+      const opLines = allLines.filter(l => l.operationId === op.id);
+
+      const enhancedLines = opLines.map((l, idx) => {
+        const lineLocId = meta.lineLocations?.[idx];
+        const destLocId = op.operationType === 'receipt' ? (lineLocId || op.destLocationId) : op.destLocationId;
+        const srcLocId = (op.operationType === 'delivery' || op.operationType === 'internal') ? (lineLocId || op.sourceLocationId) : op.sourceLocationId;
+
+        return {
+          ...l,
+          destLocationId: destLocId || undefined,
+          destLocationName: destLocId ? locMap.get(destLocId) || `Location #${destLocId}` : undefined,
+          sourceLocationId: srcLocId || undefined,
+          sourceLocationName: srcLocId ? locMap.get(srcLocId) || `Location #${srcLocId}` : undefined,
+          status: (l.doneQty >= l.demandQty ? 'done' : 'pending') as 'done' | 'pending',
+        };
+      });
+
+      return {
+        ...op,
+        warehouseId: meta.warehouseId || undefined,
+        warehouseName: meta.warehouseId ? whMap.get(meta.warehouseId) || 'Central Warehouse' : undefined,
+        sourceLocationName: op.sourceLocationId ? locMap.get(op.sourceLocationId) || 'Unknown' : 'N/A',
+        destLocationName: op.destLocationId ? locMap.get(op.destLocationId) || 'Unknown' : 'N/A',
+        notes: meta.userNotes,
+        responsible: meta.assignedStaffName || op.responsible || 'Unassigned',
+        assignedToId: meta.assignedToId || null,
+        assignedStaffName: meta.assignedStaffName || op.responsible || 'Unassigned',
+        lines: enhancedLines,
+      };
+    });
   } catch (error) {
     console.error('Error in getAllOperations:', error);
     throw new Error('Database query failed: getAllOperations', { cause: error });
@@ -441,11 +498,37 @@ export async function getOperationById(id: number) {
     const locs = await db.select().from(locations);
     const locMap = new Map(locs.map(l => [l.id, l.name]));
 
+    const whs = await db.select().from(warehouses);
+    const whMap = new Map(whs.map(w => [w.id, w.name]));
+
+    const meta = parseOpNotes(op.notes);
+
+    const enhancedLines = lines.map((l, idx) => {
+      const lineLocId = meta.lineLocations?.[idx];
+      const destLocId = op.operationType === 'receipt' ? (lineLocId || op.destLocationId) : op.destLocationId;
+      const srcLocId = (op.operationType === 'delivery' || op.operationType === 'internal') ? (lineLocId || op.sourceLocationId) : op.sourceLocationId;
+
+      return {
+        ...l,
+        destLocationId: destLocId || undefined,
+        destLocationName: destLocId ? locMap.get(destLocId) || `Location #${destLocId}` : undefined,
+        sourceLocationId: srcLocId || undefined,
+        sourceLocationName: srcLocId ? locMap.get(srcLocId) || `Location #${srcLocId}` : undefined,
+        status: (l.doneQty >= l.demandQty ? 'done' : 'pending') as 'done' | 'pending',
+      };
+    });
+
     return {
       ...op,
+      warehouseId: meta.warehouseId || undefined,
+      warehouseName: meta.warehouseId ? whMap.get(meta.warehouseId) || 'Central Warehouse' : undefined,
       sourceLocationName: op.sourceLocationId ? locMap.get(op.sourceLocationId) || 'Unknown' : 'N/A',
       destLocationName: op.destLocationId ? locMap.get(op.destLocationId) || 'Unknown' : 'N/A',
-      lines,
+      notes: meta.userNotes,
+      responsible: meta.assignedStaffName || op.responsible || 'Unassigned',
+      assignedToId: meta.assignedToId || null,
+      assignedStaffName: meta.assignedStaffName || op.responsible || 'Unassigned',
+      lines: enhancedLines,
     };
   } catch (error) {
     console.error('Error in getOperationById:', error);
@@ -456,19 +539,21 @@ export async function getOperationById(id: number) {
 export async function createOperation(data: {
   operationType: 'receipt' | 'delivery' | 'internal' | 'adjustment';
   contact?: string;
+  warehouseId?: number;
   sourceLocationId?: number;
   destLocationId?: number;
   scheduledDate?: string;
   responsible?: string;
   notes?: string;
-  lines: Array<{ productId: number; demandQty: number; doneQty?: number }>;
+  lines: Array<{
+    productId: number;
+    demandQty: number;
+    doneQty?: number;
+    destLocationId?: number;
+    sourceLocationId?: number;
+  }>;
 }) {
   try {
-    // Generate next reference sequence
-    // receipts: WH/IN/000X
-    // delivery: WH/OUT/000X
-    // internal: WH/INT/000X
-    // adjustment: WH/ADJ/000X
     const prefixMap = {
       receipt: 'WH/IN/',
       delivery: 'WH/OUT/',
@@ -481,6 +566,21 @@ export async function createOperation(data: {
     const nextSeq = existing.length + 1;
     const ref = `${prefix}${String(nextSeq).padStart(4, '0')}`;
 
+    // Map line locations into metadata notes
+    const lineLocations: Record<number, number> = {};
+    if (data.lines) {
+      data.lines.forEach((l, idx) => {
+        if (l.destLocationId) lineLocations[idx] = l.destLocationId;
+        else if (l.sourceLocationId) lineLocations[idx] = l.sourceLocationId;
+      });
+    }
+
+    const notesPayload = JSON.stringify({
+      userNotes: data.notes || '',
+      warehouseId: data.warehouseId || null,
+      lineLocations,
+    });
+
     const insertedOp = await db.insert(operations).values({
       reference: ref,
       operationType: data.operationType,
@@ -490,7 +590,7 @@ export async function createOperation(data: {
       destLocationId: data.destLocationId || null,
       scheduledDate: data.scheduledDate || new Date().toISOString().split('T')[0],
       responsible: data.responsible || 'Inventory Manager',
-      notes: data.notes || '',
+      notes: notesPayload,
     }).returning();
 
     const op = insertedOp[0];
@@ -514,13 +614,226 @@ export async function createOperation(data: {
   }
 }
 
-export async function updateOperationStatus(id: number, status: string) {
+export async function updateOperationStatus(
+  id: number,
+  status: string,
+  assignedStaff?: { id?: number; name?: string }
+) {
   try {
-    const res = await db.update(operations).set({ status, updatedAt: new Date() }).where(eq(operations.id, id)).returning();
-    return res[0];
+    const currentOp = await getOperationById(id);
+    if (!currentOp) throw new Error(`Operation #${id} not found`);
+
+    // Valid state transitions
+    const validTransitions: Record<string, string[]> = {
+      draft: ['ready', 'canceled'],
+      ready: ['processing', 'draft', 'canceled'],
+      processing: ['done', 'ready', 'canceled'],
+      waiting: ['ready', 'processing', 'canceled'],
+      done: [], // Completed state is final
+      canceled: ['draft'], // Can reopen to draft
+    };
+
+    const allowed = validTransitions[currentOp.status] || [];
+    // If not identical and not in allowed transitions, reject (unless moving to done)
+    if (currentOp.status !== status && !allowed.includes(status) && status !== 'done') {
+      throw new Error(
+        `Invalid state transition: Cannot change status from '${currentOp.status}' to '${status}'. Valid next states: ${allowed.join(', ') || 'none'}`
+      );
+    }
+
+    // When transitioning to Done: Commit stock levels & ledger in PostgreSQL
+    if (status === 'done' && currentOp.status !== 'done') {
+      const validationResult = await validateOperation(id);
+      return validationResult.operation;
+    }
+
+    // Preserve and update metadata
+    const rawOps = await db.select().from(operations).where(eq(operations.id, id)).limit(1);
+    let existingMeta: OpMetadata = { userNotes: '' };
+    if (rawOps[0]?.notes) {
+      existingMeta = parseOpNotes(rawOps[0].notes);
+    }
+
+    if (assignedStaff?.name) {
+      existingMeta.assignedStaffName = assignedStaff.name;
+    }
+    if (assignedStaff?.id !== undefined) {
+      existingMeta.assignedToId = assignedStaff.id;
+    }
+
+    const updatePayload: any = {
+      status,
+      notes: JSON.stringify(existingMeta),
+      updatedAt: new Date(),
+    };
+
+    if (assignedStaff?.name) {
+      updatePayload.responsible = assignedStaff.name;
+    }
+
+    await db.update(operations).set(updatePayload).where(eq(operations.id, id));
+    return await getOperationById(id);
   } catch (error) {
     console.error('Error in updateOperationStatus:', error);
-    throw new Error('Database query failed: updateOperationStatus', { cause: error });
+    throw error;
+  }
+}
+
+// Line-by-line shelving, picking, and relocation confirmation
+export async function confirmOperationLine(operationId: number, lineId: number) {
+  try {
+    const op = await getOperationById(operationId);
+    if (!op) throw new Error(`Operation #${operationId} not found`);
+
+    const line = op.lines.find(l => l.id === lineId);
+    if (!line) throw new Error(`Line item #${lineId} not found on operation #${operationId}`);
+    if (line.doneQty >= line.demandQty) {
+      return { success: true, message: 'Line item is already completed.', operation: op, allComplete: true };
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const qtyToProcess = line.demandQty - line.doneQty;
+    const locs = await db.select().from(locations);
+    const locMap = new Map(locs.map(l => [l.id, l.name]));
+
+    if (op.operationType === 'receipt') {
+      // Inbound: Stock increases at the line's destination location
+      const targetLocId = line.destLocationId || op.destLocationId || 1;
+
+      const existingStock = await db.select().from(stockLevels)
+        .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, targetLocId)))
+        .limit(1);
+
+      if (existingStock.length > 0) {
+        await db.update(stockLevels)
+          .set({
+            onHand: existingStock[0].onHand + qtyToProcess,
+            updatedAt: new Date(),
+          })
+          .where(eq(stockLevels.id, existingStock[0].id));
+      } else {
+        await db.insert(stockLevels).values({
+          productId: line.productId,
+          locationId: targetLocId,
+          onHand: qtyToProcess,
+          reserved: 0,
+        });
+      }
+
+      await db.insert(stockLedger).values({
+        reference: op.reference,
+        operationType: 'receipt',
+        productId: line.productId,
+        fromLocation: op.contact || 'Vendor',
+        toLocation: locMap.get(targetLocId) || 'WH/Stock1',
+        contact: op.contact,
+        quantity: qtyToProcess,
+        status: 'done',
+        date: todayStr,
+      });
+    } else if (op.operationType === 'delivery') {
+      // Outbound: Stock decreases from the line's source pick location
+      const srcLocId = line.sourceLocationId || op.sourceLocationId || 1;
+
+      const existingStock = await db.select().from(stockLevels)
+        .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, srcLocId)))
+        .limit(1);
+
+      const currentOnHand = existingStock.length ? existingStock[0].onHand : 0;
+      if (currentOnHand < qtyToProcess) {
+        throw new Error(`Insufficient stock for ${line.productName} at ${locMap.get(srcLocId) || 'location'}. On-hand: ${currentOnHand}, needed: ${qtyToProcess}`);
+      }
+
+      await db.update(stockLevels)
+        .set({
+          onHand: Math.max(0, currentOnHand - qtyToProcess),
+          reserved: Math.max(0, (existingStock[0]?.reserved || 0) - qtyToProcess),
+          updatedAt: new Date(),
+        })
+        .where(eq(stockLevels.id, existingStock[0].id));
+
+      await db.insert(stockLedger).values({
+        reference: op.reference,
+        operationType: 'delivery',
+        productId: line.productId,
+        fromLocation: locMap.get(srcLocId) || 'WH/Stock1',
+        toLocation: op.contact || 'Customer',
+        contact: op.contact,
+        quantity: qtyToProcess,
+        status: 'done',
+        date: todayStr,
+      });
+    } else if (op.operationType === 'internal') {
+      // Relocation: Move stock from source to destination location
+      const srcLocId = line.sourceLocationId || op.sourceLocationId || 1;
+      const dstLocId = line.destLocationId || op.destLocationId || 3;
+
+      const srcStock = await db.select().from(stockLevels)
+        .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, srcLocId)))
+        .limit(1);
+
+      if (srcStock.length) {
+        await db.update(stockLevels)
+          .set({ onHand: Math.max(0, srcStock[0].onHand - qtyToProcess), updatedAt: new Date() })
+          .where(eq(stockLevels.id, srcStock[0].id));
+      }
+
+      const dstStock = await db.select().from(stockLevels)
+        .where(and(eq(stockLevels.productId, line.productId), eq(stockLevels.locationId, dstLocId)))
+        .limit(1);
+
+      if (dstStock.length) {
+        await db.update(stockLevels)
+          .set({ onHand: dstStock[0].onHand + qtyToProcess, updatedAt: new Date() })
+          .where(eq(stockLevels.id, dstStock[0].id));
+      } else {
+        await db.insert(stockLevels).values({
+          productId: line.productId,
+          locationId: dstLocId,
+          onHand: qtyToProcess,
+          reserved: 0,
+        });
+      }
+
+      await db.insert(stockLedger).values({
+        reference: op.reference,
+        operationType: 'internal',
+        productId: line.productId,
+        fromLocation: locMap.get(srcLocId) || 'Source',
+        toLocation: locMap.get(dstLocId) || 'Destination',
+        contact: op.contact || 'Internal Relocation',
+        quantity: qtyToProcess,
+        status: 'done',
+        date: todayStr,
+      });
+    }
+
+    // Update doneQty for this line
+    await db.update(operationLines).set({ doneQty: line.demandQty }).where(eq(operationLines.id, lineId));
+
+    // Check all lines on this operation
+    const allOpLines = await db.select().from(operationLines).where(eq(operationLines.operationId, operationId));
+    const allDone = allOpLines.every(l => l.doneQty >= l.demandQty);
+
+    if (allDone) {
+      await db.update(operations).set({ status: 'done', updatedAt: new Date() }).where(eq(operations.id, operationId));
+    } else {
+      // Still in progress
+      await db.update(operations).set({ status: 'processing', updatedAt: new Date() }).where(eq(operations.id, operationId));
+    }
+
+    const updated = await getOperationById(operationId);
+    return {
+      success: true,
+      message: allDone
+        ? `All items verified and processed! Operation ${op.reference} is now Completed.`
+        : `Line item ${line.productName} processed! Stock balance updated.`,
+      operation: updated!,
+      allComplete: allDone,
+    };
+  } catch (error) {
+    console.error('Error in confirmOperationLine:', error);
+    throw error;
   }
 }
 
@@ -790,5 +1103,25 @@ export async function getStockLedger(search?: string, type?: string) {
   } catch (error) {
     console.error('Error in getStockLedger:', error);
     throw new Error('Database query failed: getStockLedger', { cause: error });
+  }
+}
+
+// ---------------- SYSTEM DATA MANAGEMENT ----------------
+export async function clearAllDemoData() {
+  try {
+    // Delete transactional and inventory data
+    await db.delete(operationLines);
+    await db.delete(operations);
+    await db.delete(stockLedger);
+    await db.delete(stockLevels);
+    await db.delete(products);
+
+    return {
+      success: true,
+      message: 'All inventory orders, products, and ledger history have been reset to a clean state.',
+    };
+  } catch (error) {
+    console.error('Error in clearAllDemoData:', error);
+    throw new Error('Database query failed: clearAllDemoData', { cause: error });
   }
 }

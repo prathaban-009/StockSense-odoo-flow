@@ -34,7 +34,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenMailPlans,
   onOpenFastApiDocs,
 }) => {
-  const { user, logout, switchRole } = useAuth();
+  const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
@@ -185,41 +185,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                     </div>
 
-                    <div className="px-2 py-1.5">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 px-1">
-                        Role Simulation:
-                      </p>
-                      <div className="grid grid-cols-2 gap-1 text-xs">
-                        <button
-                          onClick={() => {
-                            switchRole('Inventory Manager');
-                            setShowUserMenu(false);
-                          }}
-                          className={`py-1.5 px-2 rounded font-medium text-center transition-colors cursor-pointer ${
-                            user.role === 'Inventory Manager'
-                              ? 'bg-[#1E40AF] text-white font-semibold shadow-2xs'
-                              : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'
-                          }`}
-                        >
-                          Manager
-                        </button>
-                        <button
-                          onClick={() => {
-                            switchRole('Warehouse Staff');
-                            setShowUserMenu(false);
-                          }}
-                          className={`py-1.5 px-2 rounded font-medium text-center transition-colors cursor-pointer ${
-                            user.role === 'Warehouse Staff'
-                              ? 'bg-[#1E40AF] text-white font-semibold shadow-2xs'
-                              : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'
-                          }`}
-                        >
-                          Staff (Floor)
-                        </button>
+                    {user.warehouseName && (
+                      <div className="px-3 py-1.5 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 rounded mt-1">
+                        Facility: <span className="text-slate-800 dark:text-slate-200 font-medium">{user.warehouseName}</span>
                       </div>
-                    </div>
+                    )}
 
-                    <div className="border-t border-slate-100 dark:border-slate-800 pt-1">
+                    <div className="border-t border-slate-100 dark:border-slate-800 pt-1 mt-1">
                       {!isStaff && (
                         <>
                           <button

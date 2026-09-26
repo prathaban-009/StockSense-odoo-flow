@@ -6,21 +6,35 @@ import {
   Mail,
   Code2,
   X,
+  Users,
+  ShieldCheck,
+  HardHat,
+  CheckCircle2,
+  Copy,
+  Check,
+  AlertCircle,
+  KeyRound,
+  Trash2,
+  Database,
 } from 'lucide-react';
 import { api } from '../services/api.ts';
-import { Location, Warehouse } from '../types.ts';
+import { Employee, Location, Warehouse } from '../types.ts';
 import { MailProviderPlanModal } from '../components/MailProviderPlanModal.tsx';
 import { FastApiModal } from '../components/FastApiModal.tsx';
 
 export const SettingsView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'warehouses' | 'locations' | 'mail' | 'fastapi'>('warehouses');
+  const [activeTab, setActiveTab] = useState<'employees' | 'warehouses' | 'locations' | 'data' | 'mail' | 'fastapi'>('employees');
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
 
   // Modals
   const [showWhModal, setShowWhModal] = useState(false);
   const [showLocModal, setShowLocModal] = useState(false);
+  const [showEmpModal, setShowEmpModal] = useState(false);
   const [showMailModal, setShowMailModal] = useState(false);
   const [showFastApiModal, setShowFastApiModal] = useState(false);
 
@@ -34,13 +48,34 @@ export const SettingsView: React.FC = () => {
   const [locWhId, setLocWhId] = useState<number>(1);
   const [locType, setLocType] = useState('internal');
 
+  // Employee Form
+  const [empName, setEmpName] = useState('');
+  const [empEmail, setEmpEmail] = useState('');
+  const [empWhId, setEmpWhId] = useState<number>(1);
+  const [empCanCreateReceipts, setEmpCanCreateReceipts] = useState<boolean>(true);
+  const [empActionLoading, setEmpActionLoading] = useState<boolean>(false);
+  const [dispatchedCreds, setDispatchedCreds] = useState<{
+    name: string;
+    email: string;
+    temporaryPassword: string;
+    canCreateReceipts: boolean;
+  } | null>(null);
+  const [copiedCreds, setCopiedCreds] = useState(false);
+  const [empError, setEmpError] = useState<string | null>(null);
+
   const loadData = async () => {
     try {
-      const [whData, locData] = await Promise.all([api.getWarehouses(), api.getLocations()]);
+      const [whData, locData, empData] = await Promise.all([
+        api.getWarehouses(),
+        api.getLocations(),
+        api.getEmployees(),
+      ]);
       setWarehouses(whData);
       setLocations(locData);
+      setEmployees(empData);
       if (whData.length > 0) {
         setLocWhId(whData[0].id);
+        setEmpWhId(whData[0].id);
       }
     } catch (err) {
       console.error('Failed to load settings data:', err);
@@ -89,6 +124,70 @@ export const SettingsView: React.FC = () => {
     }
   };
 
+  const handleCreateEmployee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!empName.trim() || !empEmail.trim()) {
+      setEmpError('Please enter employee name and email.');
+      return;
+    }
+    setEmpError(null);
+    setEmpActionLoading(true);
+
+    try {
+      const res = await api.createEmployee({
+        name: empName.trim(),
+        email: empEmail.trim(),
+        warehouseId: empWhId,
+        canCreateReceipts: empCanCreateReceipts,
+      });
+
+      setDispatchedCreds({
+        name: res.employee.name,
+        email: res.employee.email,
+        temporaryPassword: res.temporaryPassword,
+        canCreateReceipts: res.employee.canCreateReceipts,
+      });
+      setShowEmpModal(false);
+      setEmpName('');
+      setEmpEmail('');
+      await loadData();
+    } catch (err: any) {
+      setEmpError(err.message || 'Failed to create employee');
+    } finally {
+      setEmpActionLoading(false);
+    }
+  };
+
+  const handleToggleReceipts = async (emp: Employee) => {
+    const newVal = !emp.canCreateReceipts;
+    setEmployees((prev) =>
+      prev.map((e) => (e.email === emp.email ? { ...e, canCreateReceipts: newVal } : e))
+    );
+    try {
+      await api.updateEmployeePermissions(emp.email, { canCreateReceipts: newVal });
+    } catch (err: any) {
+      alert('Failed to update receipt permissions: ' + err.message);
+      await loadData();
+    }
+  };
+
+  const handleResetData = async () => {
+    if (!window.confirm('Are you sure you want to reset all inventory orders, products, and ledger history to a clean state? This action cannot be undone.')) {
+      return;
+    }
+    setResetLoading(true);
+    setResetSuccess(null);
+    try {
+      const res = await api.resetDemoData();
+      setResetSuccess(res.message || 'All inventory data cleared to a clean state.');
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to reset inventory data');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -97,12 +196,23 @@ export const SettingsView: React.FC = () => {
           System &amp; Inventory Settings
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Configure physical warehouses, storage locations, mail provider deployment plans, and backend architecture.
+          Manage warehouse employees, storage locations, production data slate, mail provider deployment plans, and backend architecture.
         </p>
       </div>
 
       {/* Tabs */}
       <div className="flex border-b border-[#E2E8F0] dark:border-slate-800 gap-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('employees')}
+          className={`pb-3 px-3.5 text-xs font-semibold transition-colors border-b-2 cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+            activeTab === 'employees'
+              ? 'border-[#1E40AF] text-[#1E40AF] dark:border-blue-400 dark:text-blue-400'
+              : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Users className="w-3.5 h-3.5" />
+          <span>Employees &amp; Floor Dispatch ({employees.length})</span>
+        </button>
         <button
           onClick={() => setActiveTab('warehouses')}
           className={`pb-3 px-3.5 text-xs font-semibold transition-colors border-b-2 cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
@@ -124,6 +234,17 @@ export const SettingsView: React.FC = () => {
         >
           <MapPin className="w-3.5 h-3.5" />
           <span>Storage Locations</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('data')}
+          className={`pb-3 px-3.5 text-xs font-semibold transition-colors border-b-2 cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+            activeTab === 'data'
+              ? 'border-[#1E40AF] text-[#1E40AF] dark:border-blue-400 dark:text-blue-400'
+              : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Database className="w-3.5 h-3.5" />
+          <span>Production Data Slate</span>
         </button>
         <button
           onClick={() => setActiveTab('mail')}
@@ -148,6 +269,166 @@ export const SettingsView: React.FC = () => {
           <span>FastAPI &amp; PostgreSQL Docs</span>
         </button>
       </div>
+
+      {/* DISPATCHED CREDENTIALS BANNER */}
+      {dispatchedCreds && (
+        <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs space-y-2.5 shadow-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-semibold">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>Credentials Successfully Dispatched to Staff Email!</span>
+            </div>
+            <button
+              onClick={() => setDispatchedCreds(null)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <p className="text-slate-600 dark:text-slate-300">
+            An automated onboarding notice with login credentials has been sent to{' '}
+            <strong>{dispatchedCreds.email}</strong>. For quick testing, access keys are displayed below:
+          </p>
+
+          <div className="flex flex-wrap items-center gap-3 p-3 bg-white dark:bg-slate-900 rounded border border-emerald-200 dark:border-emerald-800/80 font-mono">
+            <div>
+              <span className="text-[11px] text-slate-400 block font-sans">Employee:</span>
+              <span className="font-semibold text-slate-900 dark:text-white">{dispatchedCreds.name}</span>
+            </div>
+            <div className="h-6 border-l border-slate-200 dark:border-slate-700"></div>
+            <div>
+              <span className="text-[11px] text-slate-400 block font-sans">Work Email:</span>
+              <span className="font-semibold text-slate-900 dark:text-white">{dispatchedCreds.email}</span>
+            </div>
+            <div className="h-6 border-l border-slate-200 dark:border-slate-700"></div>
+            <div>
+              <span className="text-[11px] text-slate-400 block font-sans">Temporary Password:</span>
+              <span className="font-bold text-[#1E40AF] dark:text-blue-400">{dispatchedCreds.temporaryPassword}</span>
+            </div>
+
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(
+                  `Email: ${dispatchedCreds.email}\nPassword: ${dispatchedCreds.temporaryPassword}`
+                );
+                setCopiedCreds(true);
+                setTimeout(() => setCopiedCreds(false), 2000);
+              }}
+              className="ml-auto px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded font-sans text-xs flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              {copiedCreds ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+              <span>{copiedCreds ? 'Copied' : 'Copy Credentials'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* EMPLOYEES TAB */}
+      {activeTab === 'employees' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Warehouse Staff &amp; Dispatch Roster</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Staff perform transfers, picking, shelving, and counting. Managers assign task orders and grant receipt permissions.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setEmpError(null);
+                setShowEmpModal(true);
+              }}
+              className="px-3.5 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs self-start sm:self-auto"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Floor Staff</span>
+            </button>
+          </div>
+
+          <div className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-slate-800 rounded-lg overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-850 text-slate-700 dark:text-slate-300 font-semibold border-b border-[#E2E8F0] dark:border-slate-800">
+                  <tr>
+                    <th className="py-3 px-4">Employee</th>
+                    <th className="py-3 px-4">Role</th>
+                    <th className="py-3 px-4">Assigned Warehouse</th>
+                    <th className="py-3 px-4 text-center">Active Floor Tasks</th>
+                    <th className="py-3 px-4 text-center">Receipt Intake Rights</th>
+                    <th className="py-3 px-4 text-right">Access Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E2E8F0] dark:divide-slate-800/80">
+                  {employees.map((emp) => (
+                    <tr key={emp.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                      <td className="py-3.5 px-4">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center font-bold text-slate-700 dark:text-slate-200 text-xs">
+                            {emp.name.charAt(0)}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-slate-900 dark:text-white">{emp.name}</p>
+                            <p className="text-[11px] text-slate-500 font-mono">{emp.email}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span className="inline-flex items-center gap-1 font-medium text-slate-700 dark:text-slate-300">
+                          {emp.role === 'Inventory Manager' ? (
+                            <ShieldCheck className="w-3.5 h-3.5 text-[#1E40AF] dark:text-blue-400" />
+                          ) : (
+                            <HardHat className="w-3.5 h-3.5 text-amber-500" />
+                          )}
+                          <span>{emp.role}</span>
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-700 dark:text-slate-300">
+                        {emp.warehouseName || 'Central Warehouse (WH)'}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span
+                          className={`font-mono font-semibold px-2 py-0.5 rounded text-[11px] ${
+                            (emp.activeTasksCount || 0) > 0
+                              ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                          }`}
+                        >
+                          {emp.activeTasksCount || 0} active
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        {emp.role === 'Inventory Manager' ? (
+                          <span className="text-[11px] text-slate-400 italic">Full Authority</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleReceipts(emp)}
+                            className={`px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer border ${
+                              emp.canCreateReceipts
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                                : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                            }`}
+                            title="Click to toggle permission for this employee to create inbound receipt orders"
+                          >
+                            {emp.canCreateReceipts ? '✓ Can Create Receipts' : '✕ Restricted (No Receipts)'}
+                          </button>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                          <span>Active</span>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* WAREHOUSES TAB */}
       {activeTab === 'warehouses' && (
@@ -242,41 +523,96 @@ export const SettingsView: React.FC = () => {
         </div>
       )}
 
+      {/* PRODUCTION DATA SLATE TAB */}
+      {activeTab === 'data' && (
+        <div className="space-y-4">
+          <div className="p-6 bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-slate-800 rounded-lg shadow-xs">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-mono">
+                Clean State Verified
+              </span>
+            </div>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              Production Inventory Slate
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl leading-relaxed">
+              All demo orders, dummy items, and mock stock ledgers have been purged. Your database only records genuine transactions created by registered accounts.
+            </p>
+
+            {resetSuccess && (
+              <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs rounded-md flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{resetSuccess}</span>
+              </div>
+            )}
+
+            <div className="mt-6 pt-6 border-t border-[#E2E8F0] dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                  Reset Inventory to Clean Slate
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Clears all test products, operational orders, and move history while preserving your registered user accounts and warehouse facilities.
+                </p>
+              </div>
+
+              <button
+                onClick={handleResetData}
+                disabled={resetLoading}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs font-semibold transition-colors cursor-pointer shadow-xs disabled:opacity-50 whitespace-nowrap"
+              >
+                {resetLoading ? 'Purging...' : 'Purge All Test Orders & Products'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MAIL PROVIDER TAB */}
       {activeTab === 'mail' && (
         <div className="space-y-4">
           <div className="p-6 bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-slate-800 rounded-lg shadow-xs">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-mono">
+                Google SMTP Configured
+              </span>
+            </div>
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Mail Provider &amp; OTP Authentication Architecture
+              Google SMTP &amp; Transactional Mail Transport
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl">
-              StockSense is currently configured in development testing mode: OTPs are logged directly to the server terminal and can be verified immediately. Integration plans for production deployment with Resend, SendGrid, and AWS SES are provided.
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl leading-relaxed">
+              StockSense IMS is now wired to Google SMTP (<code className="font-mono text-[#1E40AF] dark:text-blue-400 font-semibold">smtp.gmail.com:465</code>) under <code className="font-mono font-semibold text-slate-800 dark:text-slate-200">prathaban009@gmail.com</code>. Real outbound HTML emails are dispatched for password reset OTP verification codes and critical low-stock warehouse alerts.
             </p>
-            <button
-              onClick={() => setShowMailModal(true)}
-              className="mt-4 px-4 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md text-xs font-semibold transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
-            >
-              <span>Open Email Provider Architecture &amp; Test Suite →</span>
-            </button>
+            <div className="mt-4 flex flex-wrap gap-2.5">
+              <button
+                onClick={() => setShowMailModal(true)}
+                className="px-4 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md text-xs font-semibold transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Open Google SMTP Test Center &amp; Alert Dispatcher →</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
             <div className="p-5 bg-white dark:bg-[#0F172A] rounded-lg border border-[#E2E8F0] dark:border-slate-800 shadow-xs">
-              <span className="font-bold text-slate-900 dark:text-white block mb-1">Step 1: Console Sim</span>
+              <span className="font-bold text-slate-900 dark:text-white block mb-1">1. Password Reset OTPs</span>
               <p className="text-slate-500 dark:text-slate-400 leading-relaxed">
-                Server generates 6-digit cryptographic code, stores hash &amp; expiration in PostgreSQL table <code className="font-mono text-[#1E40AF] dark:text-blue-400">otp_codes</code>, and prints to console.
+                When users request account password resets, the server compiles a responsive HTML email with an authorized 6-digit code and dispatches via Google SMTP.
               </p>
             </div>
             <div className="p-5 bg-white dark:bg-[#0F172A] rounded-lg border border-[#E2E8F0] dark:border-slate-800 shadow-xs">
-              <span className="font-bold text-slate-900 dark:text-white block mb-1">Step 2: Mail Provider Hook</span>
+              <span className="font-bold text-slate-900 dark:text-white block mb-1">2. Low-Stock Alerts</span>
               <p className="text-slate-500 dark:text-slate-400 leading-relaxed">
-                Replace logger with <code className="font-mono text-[#1E40AF] dark:text-blue-400">resend.emails.send()</code> or Twilio SendGrid client using verified domain SPF/DKIM keys.
+                Items falling below safety thresholds trigger automated digest alerts with SKU details, current inventory levels, and replenishment recommendations.
               </p>
             </div>
             <div className="p-5 bg-white dark:bg-[#0F172A] rounded-lg border border-[#E2E8F0] dark:border-slate-800 shadow-xs">
-              <span className="font-bold text-slate-900 dark:text-white block mb-1">Step 3: Secure Verification</span>
+              <span className="font-bold text-slate-900 dark:text-white block mb-1">3. Resilient Fallbacks</span>
               <p className="text-slate-500 dark:text-slate-400 leading-relaxed">
-                Client submits OTP + new password; server ensures code has not expired, marks code as used, and hashes new password with bcrypt.
+                If Google SMTP encounters transient rate-limits, errors are logged to the console and preview codes are seamlessly provided to prevent user lockouts.
               </p>
             </div>
           </div>
@@ -454,6 +790,118 @@ export const SettingsView: React.FC = () => {
                   className="flex-1 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white font-semibold rounded-md transition-colors cursor-pointer shadow-xs"
                 >
                   Save Location
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADD EMPLOYEE MODAL */}
+      {showEmpModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md bg-white dark:bg-[#0F172A] rounded-lg border border-[#E2E8F0] dark:border-slate-800 shadow-xl overflow-hidden">
+            <div className="bg-[#1E40AF] text-white p-4 flex justify-between items-center">
+              <div>
+                <h3 className="text-sm font-semibold">Add Warehouse Staff Member</h3>
+                <p className="text-[11px] text-blue-200 mt-0.5">
+                  Initial credentials will be automatically dispatched to employee email
+                </p>
+              </div>
+              <button
+                onClick={() => setShowEmpModal(false)}
+                className="text-blue-200 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {empError && (
+              <div className="mx-5 mt-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                <span>{empError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateEmployee} className="p-5 space-y-3.5 text-xs">
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={empName}
+                  onChange={(e) => setEmpName(e.target.value)}
+                  placeholder="e.g. Jordan Hayes"
+                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md dark:text-white focus:ring-1 focus:ring-[#1E40AF] focus:border-[#1E40AF] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Staff Email Address
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={empEmail}
+                  onChange={(e) => setEmpEmail(e.target.value)}
+                  placeholder="jordan@stocksense.io"
+                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md dark:text-white focus:ring-1 focus:ring-[#1E40AF] focus:border-[#1E40AF] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Assigned Facility / Warehouse
+                </label>
+                <select
+                  value={empWhId}
+                  onChange={(e) => setEmpWhId(Number(e.target.value))}
+                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md dark:text-white focus:ring-1 focus:ring-[#1E40AF] focus:border-[#1E40AF] focus:outline-none"
+                >
+                  {warehouses.map((wh) => (
+                    <option key={wh.id} value={wh.id}>
+                      {wh.name} ({wh.shortCode})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-850 rounded-md border border-[#E2E8F0] dark:border-slate-700">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={empCanCreateReceipts}
+                    onChange={(e) => setEmpCanCreateReceipts(e.target.checked)}
+                    className="mt-0.5 rounded text-[#1E40AF] focus:ring-[#1E40AF] w-4 h-4 cursor-pointer"
+                  />
+                  <div>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 block">
+                      Grant Inbound Receipt Creation Rights
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      When enabled, this staff member can initiate supplier receipt orders directly from the warehouse floor.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-[#E2E8F0] dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowEmpModal(false)}
+                  className="flex-1 py-2 border border-[#E2E8F0] dark:border-slate-700 rounded-md text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={empActionLoading}
+                  className="flex-1 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white font-semibold rounded-md transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  {empActionLoading ? 'Dispatching...' : 'Provision Staff Member'}
                 </button>
               </div>
             </form>

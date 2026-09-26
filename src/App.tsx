@@ -10,6 +10,7 @@ import { SettingsView } from './views/SettingsView.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { MailProviderPlanModal } from './components/MailProviderPlanModal.tsx';
 import { FastApiModal } from './components/FastApiModal.tsx';
+import { LoginView } from './views/LoginView.tsx';
 import { Operation, OperationType } from './types.ts';
 
 function MainApp() {
@@ -33,8 +34,15 @@ function MainApp() {
       if (currentTab === 'dashboard' || currentTab === 'settings') {
         setCurrentTab('operations');
       }
+    } else if (user) {
+      // If manager logged in and on operations by default, can stay or switch
     }
-  }, [isStaff, currentTab]);
+  }, [isStaff, user]);
+
+  // Mandatory Full-Screen Login First
+  if (!user) {
+    return <LoginView />;
+  }
 
   const handleNavigateToOperations = (type?: string, status?: string) => {
     if (type) setOpsInitialType(type as OperationType);

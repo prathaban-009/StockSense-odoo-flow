@@ -10,7 +10,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { login, register, loginWithGoogle, loginAsDemo } = useAuth();
+  const { login, register, loginWithGoogle } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -53,11 +53,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleDemoSignIn = (demoRole: UserRole) => {
-    loginAsDemo(demoRole);
-    onClose();
   };
 
   return (
@@ -109,29 +104,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 {error}
               </div>
             )}
-
-            {/* Quick Demo Switchers */}
-            <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-md border border-[#E2E8F0] dark:border-slate-700">
-              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">
-                Quick Evaluation Access:
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleDemoSignIn('Inventory Manager')}
-                  className="py-1.5 px-2 bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 border border-[#E2E8F0] dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:text-[#1E40AF] rounded text-xs font-semibold transition-colors text-center cursor-pointer shadow-2xs"
-                >
-                  Inventory Manager
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDemoSignIn('Warehouse Staff')}
-                  className="py-1.5 px-2 bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 border border-[#E2E8F0] dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:text-[#1E40AF] rounded text-xs font-semibold transition-colors text-center cursor-pointer shadow-2xs"
-                >
-                  Warehouse Staff
-                </button>
-              </div>
-            </div>
 
             <form onSubmit={handleSubmit} className="space-y-3.5">
               {mode === 'signup' && (

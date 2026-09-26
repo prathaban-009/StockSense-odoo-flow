@@ -1,5 +1,6 @@
 import {
   DashboardStats,
+  Employee,
   Location,
   Operation,
   Product,
@@ -235,12 +236,19 @@ export const api = {
   async createOperation(data: {
     operationType: 'receipt' | 'delivery' | 'internal' | 'adjustment';
     contact?: string;
+    warehouseId?: number;
     sourceLocationId?: number;
     destLocationId?: number;
     scheduledDate?: string;
     responsible?: string;
     notes?: string;
-    lines: Array<{ productId: number; demandQty: number; doneQty?: number }>;
+    lines: Array<{
+      productId: number;
+      demandQty: number;
+      doneQty?: number;
+      destLocationId?: number;
+      sourceLocationId?: number;
+    }>;
   }) {
     const res = await fetch('/api/operations', {
       method: 'POST',
@@ -254,13 +262,20 @@ export const api = {
     return res.json() as Promise<Operation>;
   },
 
-  async updateOperationStatus(id: number, status: string) {
+  async updateOperationStatus(
+    id: number,
+    status: string,
+    assignedStaff?: { id?: number; name?: string }
+  ) {
     const res = await fetch(`/api/operations/${id}/status`, {
       method: 'PUT',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, assignedStaff }),
     });
-    if (!res.ok) throw new Error('Failed to update status');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to update status');
+    }
     return res.json() as Promise<Operation>;
   },
 
@@ -280,6 +295,53 @@ export const api = {
     return data as { success: boolean; message: string; operation: Operation };
   },
 
+  async confirmOperationLine(operationId: number, lineId: number) {
+    const res = await fetch(`/api/operations/${operationId}/lines/${lineId}/confirm`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'Failed to process item');
+    }
+    return data as { success: boolean; message: string; operation: Operation; allComplete: boolean };
+  },
+
+  // Employees
+  async getEmployees() {
+    const res = await fetch('/api/employees', { headers: getAuthHeaders() });
+    if (!res.ok) throw new Error('Failed to load employee roster');
+    return res.json() as Promise<Employee[]>;
+  },
+
+  async createEmployee(data: {
+    name: string;
+    email: string;
+    warehouseId?: number;
+    canCreateReceipts?: boolean;
+  }) {
+    const res = await fetch('/api/employees', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      throw new Error(result.error || 'Failed to create employee');
+    }
+    return result as { employee: Employee; temporaryPassword: string; emailDispatched: boolean };
+  },
+
+  async updateEmployeePermissions(email: string, data: { canCreateReceipts?: boolean; warehouseId?: number }) {
+    const res = await fetch(`/api/employees/${encodeURIComponent(email)}/permissions`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to update employee permissions');
+    return res.json();
+  },
+
   // Stock Ledger
   async getStockLedger(search?: string, type?: string) {
     const params = new URLSearchParams();
@@ -295,6 +357,69 @@ export const api = {
   async getEmailPlans() {
     const res = await fetch('/api/email-plans');
     if (!res.ok) throw new Error('Failed to load email provider plans');
+    return res.json();
+  },
+
+  // Google SMTP Mail Service
+  async getSmtpStatus() {
+    const res = await fetch('/api/mail/status');
+    if (!res.ok) throw new Error('Failed to fetch SMTP status');
+    return res.json() as Promise<{
+      configured: boolean;
+      host: string;
+      port: number;
+      secure: boolean;
+      username: string;
+      connected: boolean;
+      message: string;
+    }>;
+  },
+
+  async sendTestEmail(recipient: string) {
+    const res = await fetch('/api/mail/test-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to dispatch test email');
+    }
+    return res.json() as Promise<{
+      success: boolean;
+      deliveredViaSmtp: boolean;
+      messageId?: string;
+      error?: string;
+    }>;
+  },
+
+  async sendLowStockAlert(recipient?: string) {
+    const res = await fetch('/api/mail/send-low-stock-alert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to trigger low stock alert');
+    }
+    return res.json() as Promise<{
+      success: boolean;
+      deliveredViaSmtp: boolean;
+      itemCount: number;
+      recipient: string;
+      message: string;
+      error?: string;
+    }>;
+  },
+
+  // System Management
+  async resetDemoData() {
+    const res = await fetch('/api/system/reset-demo-data', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error('Failed to reset demo data');
     return res.json();
   },
 };

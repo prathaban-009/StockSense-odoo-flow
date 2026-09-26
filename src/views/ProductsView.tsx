@@ -13,6 +13,7 @@ import {
   X,
   HardHat,
   EyeOff,
+  Mail,
 } from 'lucide-react';
 import { api } from '../services/api.ts';
 import { Location, Product, ProductCategory } from '../types.ts';
@@ -47,16 +48,20 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
   const [sku, setSku] = useState('');
   const [categoryId, setCategoryId] = useState<number | undefined>(undefined);
   const [uom, setUom] = useState('Units');
-  const [costPrice, setCostPrice] = useState('3000.00');
-  const [salePrice, setSalePrice] = useState('4500.00');
+  const [costPrice, setCostPrice] = useState('');
+  const [salePrice, setSalePrice] = useState('');
   const [minReorderLevel, setMinReorderLevel] = useState(10);
-  const [reorderQty, setReorderQty] = useState(50);
+  const [reorderQty, setReorderQty] = useState(20);
   const [description, setDescription] = useState('');
-  const [initialStock, setInitialStock] = useState(50);
+  const [initialStock, setInitialStock] = useState(0);
   const [initialLocationId, setInitialLocationId] = useState<number | undefined>(undefined);
 
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Email alert dispatch state
+  const [emailAlertLoading, setEmailAlertLoading] = useState(false);
+  const [emailAlertSuccess, setEmailAlertSuccess] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
@@ -395,9 +400,9 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
           </select>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {isStaff && (
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline mr-2">
               Role: Warehouse Staff · Storage Bin View
             </span>
           )}
@@ -412,10 +417,44 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
             }`}
           >
             <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-            <span>Low Stock Alert ({products.filter((p) => p.onHand <= (p.minReorderLevel ?? 10)).length})</span>
+            <span>Low Stock Filter ({products.filter((p) => p.onHand <= (p.minReorderLevel ?? 10)).length})</span>
           </button>
+
+          {/* Email Low-Stock Reorder Alert Button (Managers) */}
+          {!isStaff && products.some((p) => p.onHand <= (p.minReorderLevel ?? 10)) && (
+            <button
+              onClick={async () => {
+                setEmailAlertLoading(true);
+                setEmailAlertSuccess(null);
+                try {
+                  const res = await api.sendLowStockAlert();
+                  setEmailAlertSuccess(res.message);
+                  setTimeout(() => setEmailAlertSuccess(null), 5000);
+                } catch (err: any) {
+                  alert(err.message || 'Failed to dispatch low-stock email alert');
+                } finally {
+                  setEmailAlertLoading(false);
+                }
+              }}
+              disabled={emailAlertLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+              title="Dispatches HTML reorder report via Google SMTP to prathaban009@gmail.com"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              <span>{emailAlertLoading ? 'Emailing...' : 'Email Reorder Alert'}</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {emailAlertSuccess && (
+        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs rounded-md flex items-center justify-between">
+          <span className="font-medium">{emailAlertSuccess}</span>
+          <button onClick={() => setEmailAlertSuccess(null)} className="text-emerald-600 dark:text-emerald-400 hover:underline">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Stock Table with Comfortable Enterprise Density (Role-Tailored) */}
       <div className="bg-white dark:bg-[#0F172A] rounded-lg border border-[#E2E8F0] dark:border-slate-800 overflow-hidden shadow-xs">
@@ -446,8 +485,29 @@ export const ProductsView: React.FC<ProductsViewProps> = ({ initialFilter, onNav
             <tbody className="divide-y divide-[#E2E8F0] dark:divide-slate-800/80 text-slate-700 dark:text-slate-300">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={isStaff ? 8 : 9} className="py-12 text-center text-slate-400">
-                    No products found matching criteria.
+                  <td colSpan={isStaff ? 8 : 9} className="py-16 text-center">
+                    <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                      <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-3">
+                        <Package className="w-6 h-6" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                        {products.length === 0 ? 'No Products in Catalog' : 'No Matching Products'}
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 mb-4 leading-relaxed">
+                        {products.length === 0
+                          ? 'Your inventory catalog is completely clean. Add your actual products to begin tracking real stock levels, storage bins, and floor movements.'
+                          : 'No products match your current search query or category filter.'}
+                      </p>
+                      {products.length === 0 && !isStaff && (
+                        <button
+                          onClick={() => setShowNewModal(true)}
+                          className="px-4 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add Your First Product</span>
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (

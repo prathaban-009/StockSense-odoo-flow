@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Mail, Check, Terminal, ShieldCheck, Send, Copy, X } from 'lucide-react';
-import { useAuth } from '../context/AuthContext.tsx';
+import React, { useEffect, useState } from 'react';
+import { Mail, Check, Terminal, ShieldCheck, Send, Copy, X, CheckCircle2, AlertTriangle, RefreshCw, AlertCircle } from 'lucide-react';
+import { api } from '../services/api.ts';
 
 interface MailProviderPlanModalProps {
   isOpen: boolean;
@@ -8,12 +8,63 @@ interface MailProviderPlanModalProps {
 }
 
 export const MailProviderPlanModal: React.FC<MailProviderPlanModalProps> = ({ isOpen, onClose }) => {
-  const { requestOtp } = useAuth();
-  const [testEmail, setTestEmail] = useState('inventory-admin@company.com');
+  const [testEmail, setTestEmail] = useState('prathaban009@gmail.com');
   const [testLoading, setTestLoading] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    deliveredViaSmtp: boolean;
+    message?: string;
+    error?: string;
+  } | null>(null);
+
+  const [lowStockLoading, setLowStockLoading] = useState(false);
+  const [lowStockResult, setLowStockResult] = useState<{
+    success: boolean;
+    deliveredViaSmtp: boolean;
+    message: string;
+    itemCount?: number;
+    error?: string;
+  } | null>(null);
+
+  const [smtpStatus, setSmtpStatus] = useState<{
+    configured: boolean;
+    host: string;
+    port: number;
+    secure: boolean;
+    username: string;
+    connected: boolean;
+    message: string;
+  } | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+
   const [activeCodeTab, setActiveCodeTab] = useState<'express' | 'fastapi'>('express');
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      checkStatus();
+    }
+  }, [isOpen]);
+
+  const checkStatus = async () => {
+    setStatusLoading(true);
+    try {
+      const status = await api.getSmtpStatus();
+      setSmtpStatus(status);
+    } catch (err: any) {
+      setSmtpStatus({
+        configured: true,
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        username: 'prathaban009@gmail.com',
+        connected: false,
+        message: err.message || 'Could not verify SMTP connection',
+      });
+    } finally {
+      setStatusLoading(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -21,67 +72,89 @@ export const MailProviderPlanModal: React.FC<MailProviderPlanModalProps> = ({ is
     setTestLoading(true);
     setTestResult(null);
     try {
-      const res = await requestOtp(testEmail);
-      setTestResult(
-        `OTP Code Generated & Logged to Server Terminal:\nCode: ${res.testOtpCode} (Valid for 10 minutes)\nRecipient: ${testEmail}`
-      );
+      const res = await api.sendTestEmail(testEmail);
+      setTestResult({
+        success: res.success,
+        deliveredViaSmtp: res.deliveredViaSmtp,
+        message: res.deliveredViaSmtp
+          ? `✅ Live email successfully dispatched via Google SMTP to ${testEmail}! Check your inbox.`
+          : `⚠️ Google SMTP returned fallback: ${res.error}`,
+      });
     } catch (err: any) {
-      setTestResult(`Error triggering test OTP: ${err.message || 'Unknown error'}`);
+      setTestResult({
+        success: false,
+        deliveredViaSmtp: false,
+        error: err.message || 'Failed to dispatch test email',
+      });
     } finally {
       setTestLoading(false);
     }
   };
 
-  const expressCode = `// src/services/mailer.ts (Express / Node.js)
-import { Resend } from 'resend';
+  const handleSendLowStockAlert = async () => {
+    setLowStockLoading(true);
+    setLowStockResult(null);
+    try {
+      const res = await api.sendLowStockAlert(testEmail);
+      setLowStockResult(res);
+    } catch (err: any) {
+      setLowStockResult({
+        success: false,
+        deliveredViaSmtp: false,
+        message: err.message || 'Failed to dispatch low stock alert',
+        error: err.message,
+      });
+    } finally {
+      setLowStockLoading(false);
+    }
+  };
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+  const expressCode = `// src/services/mailer.ts (Google SMTP via nodemailer)
+import nodemailer from 'nodemailer';
+
+const transporter = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // SSL port 465
+  auth: {
+    user: process.env.SMTP_USERNAME, // prathaban009@gmail.com
+    pass: process.env.SMTP_PASSWORD, // Google App Password
+  },
+});
 
 export async function sendOtpEmail(to: string, otpCode: string) {
-  if (process.env.NODE_ENV !== 'production' || !process.env.RESEND_API_KEY) {
-    // Development Mode: Terminal standard output
-    console.log(\`[CONSOLE OTP] Recipient: \${to} | Code: \${otpCode}\`);
-    return { success: true, mode: 'console' };
-  }
-
-  // Production Dispatch via Resend:
-  return await resend.emails.send({
-    from: 'StockSense IMS <security@stocksense.io>',
+  return await transporter.sendMail({
+    from: process.env.SMTP_FROM || 'StockSense IMS <prathaban009@gmail.com>',
     to,
-    subject: 'Your StockSense Password Reset Code',
+    subject: 'Your StockSense IMS Password Reset Passcode',
     html: \`
-      <div style="font-family: sans-serif; padding: 20px;">
-        <h2>StockSense Authentication</h2>
-        <p>Your one-time passcode for password reset is:</p>
-        <h1 style="font-size: 32px; letter-spacing: 4px; color: #1E40AF;">\${otpCode}</h1>
-        <p>This code expires in 10 minutes. If you did not request this, please disregard.</p>
+      <div style="font-family: sans-serif; padding: 24px; max-width: 500px; border: 1px solid #E2E8F0; border-radius: 8px;">
+        <h2 style="color: #1E40AF;">StockSense Security Verification</h2>
+        <p>Your one-time passcode is:</p>
+        <h1 style="font-size: 34px; letter-spacing: 5px; color: #1E40AF;">\${otpCode}</h1>
+        <p>This code expires in 10 minutes.</p>
       </div>
     \`
   });
 }`;
 
-  const fastapiCode = `# fastapi_backend/routers/auth.py (FastAPI / Python)
-import os
-import resend
+  const fastapiCode = `# fastapi_backend/routers/auth.py (Google SMTP via smtplib)
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-resend.api_key = os.getenv("RESEND_API_KEY")
-
-def send_otp_email(recipient_email: str, otp_code: str):
-    mail_provider = os.getenv("MAIL_PROVIDER", "console")
-
-    if mail_provider == "console":
-        # Development Mode: Print to terminal
-        print(f"[CONSOLE OTP] Recipient: {recipient_email} | Code: {otp_code}")
-        return {"status": "printed_to_console"}
-
-    # Production Dispatch:
-    params = {
-        "from": "StockSense IMS <security@stocksense.io>",
-        "to": [recipient_email],
-        "subject": "Your StockSense Password Reset OTP",
-        "html": f"<strong>Your 6-digit code:</strong> <h1 style='color:#1E40AF'>{otp_code}</h1>",
-    }
-    return resend.Emails.send(params)`;
+def send_otp_email(recipient: str, otp_code: str):
+    msg = MIMEMultipart()
+    msg['From'] = "StockSense IMS <prathaban009@gmail.com>"
+    msg['To'] = recipient
+    msg['Subject'] = "Your StockSense IMS Password Reset Passcode"
+    
+    html = f"<h2>Your Passcode: <b>{otp_code}</b></h2><p>Expires in 10 minutes.</p>"
+    msg.attach(MIMEText(html, 'html'))
+    
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login("prathaban009@gmail.com", "YOUR_APP_PASSWORD")
+        server.send_message(msg)`;
 
   const copyCode = () => {
     navigator.clipboard.writeText(activeCodeTab === 'express' ? expressCode : fastapiCode);
@@ -97,9 +170,9 @@ def send_otp_email(recipient_email: str, otp_code: str):
           <div className="flex items-center gap-2.5">
             <Mail className="w-4 h-4 text-blue-200" />
             <div>
-              <h2 className="text-sm font-semibold">Mail Provider &amp; OTP Integration Plan</h2>
+              <h2 className="text-sm font-semibold">Google SMTP &amp; Outbound Notification Center</h2>
               <p className="text-xs text-blue-200">
-                Current: Terminal logging · Production Blueprint: Resend / SendGrid / AWS SES
+                Active Provider: Google SMTP (smtp.gmail.com:465 SSL) • prathaban009@gmail.com
               </p>
             </div>
           </div>
@@ -110,100 +183,147 @@ def send_otp_email(recipient_email: str, otp_code: str):
 
         {/* Content */}
         <div className="p-5 space-y-5 max-h-[75vh] overflow-y-auto text-xs">
-          {/* Current State Indicator */}
+          {/* Active SMTP Connection Status Card */}
           <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-[#E2E8F0] dark:border-slate-800 rounded-md">
-            <div className="flex items-start gap-3">
-              <div className="p-1.5 bg-blue-50 dark:bg-blue-950/60 text-[#1E40AF] dark:text-blue-300 rounded mt-0.5 border border-blue-200 dark:border-blue-900">
-                <Terminal className="w-4 h-4" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-slate-900 dark:text-white">
-                  Active Mode: Standard Terminal Output
-                </h3>
-                <p className="text-slate-500 dark:text-slate-400 mt-0.5">
-                  Generated 6-digit OTP codes are logged to the dev server console and saved in the PostgreSQL <code className="font-mono text-[#1E40AF] dark:text-blue-400">otp_codes</code> table.
-                </p>
-                <div className="mt-2 font-mono text-[11px] bg-slate-950 text-emerald-400 p-2.5 rounded border border-slate-800">
-                  [AUTH OTP] Recipient: test@company.com | Code: 849201 | Expiry: 10 mins | Stored: PostgreSQL
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className={`p-2 rounded mt-0.5 border ${
+                  smtpStatus?.connected
+                    ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                    : 'bg-blue-50 dark:bg-blue-950/60 text-[#1E40AF] dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                }`}>
+                  {smtpStatus?.connected ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <Mail className="w-4 h-4" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-slate-900 dark:text-white">
+                      Google SMTP Transport Configuration
+                    </h3>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                      Configured
+                    </span>
+                  </div>
+                  <p className="text-slate-500 dark:text-slate-400 mt-1">
+                    Host: <code className="font-mono text-slate-800 dark:text-slate-200">smtp.gmail.com</code> • Port: <code className="font-mono text-slate-800 dark:text-slate-200">465 (SSL/TLS)</code> • Account: <code className="font-mono text-[#1E40AF] dark:text-blue-400 font-semibold">prathaban009@gmail.com</code>
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                    {smtpStatus?.message || 'Authentication credentials mounted in application environment.'}
+                  </p>
                 </div>
               </div>
+
+              <button
+                onClick={checkStatus}
+                disabled={statusLoading}
+                className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-[#E2E8F0] dark:border-slate-700 rounded text-[11px] font-medium flex items-center gap-1 cursor-pointer"
+              >
+                <RefreshCw className={`w-3 h-3 ${statusLoading ? 'animate-spin' : ''}`} />
+                <span>Re-verify</span>
+              </button>
             </div>
           </div>
 
-          {/* Quick OTP Console Tester */}
+          {/* Live SMTP Dispatch Diagnostic Tool */}
           <div className="p-4 bg-white dark:bg-slate-900 rounded-md border border-[#E2E8F0] dark:border-slate-800">
-            <h4 className="font-semibold text-slate-800 dark:text-white mb-2">
-              Trigger Test OTP Code
+            <h4 className="font-semibold text-slate-800 dark:text-white mb-1.5 flex items-center gap-1.5">
+              <Send className="w-3.5 h-3.5 text-[#1E40AF] dark:text-blue-400" />
+              <span>Send Live Test Email via Google SMTP</span>
             </h4>
+            <p className="text-slate-500 dark:text-slate-400 mb-3 text-[11px]">
+              Sends an authentic HTML verification test message through Google's SMTP servers to confirm live delivery.
+            </p>
+
             <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="email"
                 value={testEmail}
                 onChange={(e) => setTestEmail(e.target.value)}
-                placeholder="Enter email to simulate"
+                placeholder="Enter recipient email address"
                 className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-[#E2E8F0] dark:border-slate-700 rounded-md focus:ring-1 focus:ring-[#1E40AF] focus:border-[#1E40AF] focus:outline-none dark:text-white"
               />
               <button
                 type="button"
                 onClick={handleTestOtp}
                 disabled={testLoading}
-                className="px-4 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md font-semibold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-xs"
+                className="px-4 py-2 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded-md font-semibold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-xs whitespace-nowrap"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>{testLoading ? 'Generating...' : 'Generate Test OTP'}</span>
+                <span>{testLoading ? 'Sending...' : 'Send Live Test Email'}</span>
               </button>
             </div>
+
             {testResult && (
-              <pre className="mt-3 p-3 bg-slate-950 text-emerald-400 font-mono text-[11px] rounded whitespace-pre-wrap border border-slate-800">
-                {testResult}
-              </pre>
+              <div className={`mt-3 p-3 rounded-md text-[11px] flex items-start gap-2 border ${
+                testResult.deliveredViaSmtp
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
+              }`}>
+                {testResult.deliveredViaSmtp ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <span className="font-semibold block">{testResult.message || testResult.error}</span>
+                  {!testResult.deliveredViaSmtp && (
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 block">
+                      Note: If Google blocks the outbound connection in cloud environments due to network policies, StockSense automatically provides preview OTPs so users can continue testing without interruption.
+                    </span>
+                  )}
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Mail Provider Comparison & Production Architecture */}
-          <div>
-            <h4 className="font-semibold text-slate-900 dark:text-white mb-2.5">
-              Production Mail Provider Migration Blueprint
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="p-3.5 rounded-md border border-[#E2E8F0] dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
-                <div className="flex justify-between items-start mb-1">
-                  <span className="font-semibold text-slate-900 dark:text-white">Resend API</span>
-                  <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-blue-50 dark:bg-[#1E40AF]/30 text-[#1E40AF] dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded">
-                    Recommended
-                  </span>
-                </div>
+          {/* Low Stock Alert Dispatch Tool */}
+          <div className="p-4 bg-white dark:bg-slate-900 rounded-md border border-[#E2E8F0] dark:border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="font-semibold text-slate-800 dark:text-white mb-0.5 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Low Stock Safety Reorder Alerts</span>
+                </h4>
                 <p className="text-slate-500 dark:text-slate-400 text-[11px]">
-                  Modern developer-first API with instant DNS DKIM setup and high deliverability.
+                  Scans active PostgreSQL inventory for items below minimum safety levels and emails a structured reorder table to the warehouse manager.
                 </p>
-                <div className="mt-2.5 pt-2 border-t border-[#E2E8F0] dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 space-y-0.5">
-                  <div><strong>Package:</strong> resend</div>
-                  <div><strong>Env:</strong> RESEND_API_KEY</div>
-                </div>
               </div>
 
-              <div className="p-3.5 rounded-md border border-[#E2E8F0] dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
-                <span className="font-semibold text-slate-900 dark:text-white block mb-1">Twilio SendGrid</span>
-                <p className="text-slate-500 dark:text-slate-400 text-[11px]">
-                  Enterprise high-volume transactional email with sub-account management.
-                </p>
-                <div className="mt-2.5 pt-2 border-t border-[#E2E8F0] dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 space-y-0.5">
-                  <div><strong>Package:</strong> @sendgrid/mail</div>
-                  <div><strong>Env:</strong> SENDGRID_API_KEY</div>
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-md border border-[#E2E8F0] dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
-                <span className="font-semibold text-slate-900 dark:text-white block mb-1">AWS SES</span>
-                <p className="text-slate-500 dark:text-slate-400 text-[11px]">
-                  Cost-effective scalable service integrated with IAM credentials and CloudWatch.
-                </p>
-                <div className="mt-2.5 pt-2 border-t border-[#E2E8F0] dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 space-y-0.5">
-                  <div><strong>Package:</strong> @aws-sdk/client-ses</div>
-                  <div><strong>Env:</strong> AWS_SES_REGION</div>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={handleSendLowStockAlert}
+                disabled={lowStockLoading}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-md font-semibold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-xs whitespace-nowrap self-start sm:self-auto"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>{lowStockLoading ? 'Scanning & Dispatching...' : 'Dispatch Reorder Alert'}</span>
+              </button>
             </div>
+
+            {lowStockResult && (
+              <div className={`mt-3 p-3 rounded-md text-[11px] flex items-start gap-2 border ${
+                lowStockResult.success
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+              }`}>
+                {lowStockResult.success ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <span className="font-semibold block">{lowStockResult.message}</span>
+                  {lowStockResult.itemCount !== undefined && (
+                    <span className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5 block">
+                      Target items identified: {lowStockResult.itemCount}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Implementation Code Snippet */}
@@ -250,13 +370,13 @@ def send_otp_email(recipient_email: str, otp_code: str):
           <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-md border border-[#E2E8F0] dark:border-slate-800">
             <h4 className="font-semibold text-slate-900 dark:text-white mb-1.5 flex items-center gap-1.5">
               <ShieldCheck className="w-4 h-4 text-[#1E40AF] dark:text-blue-400" />
-              Production Security Checklist
+              Google SMTP Security &amp; Delivery Policies
             </h4>
             <ul className="list-disc pl-4 space-y-1 text-slate-600 dark:text-slate-400 text-[11px]">
-              <li>Never expose API keys on the frontend; all dispatches route through the server backend.</li>
-              <li>OTP codes are cryptographically generated and expire automatically in 10 minutes.</li>
-              <li>Codes are invalidated immediately once verified to prevent replay attacks.</li>
-              <li>Passwords are hashed with bcrypt before storage in PostgreSQL.</li>
+              <li>Using 16-character Google App Passwords ensures two-factor authentication (2FA) is maintained on your Google Account.</li>
+              <li>Outbound connections use port 465 with SSL/TLS encryption for end-to-end security.</li>
+              <li>Generated OTP codes expire automatically in 10 minutes and are invalidated in PostgreSQL upon successful verification.</li>
+              <li>Fallback preview codes ensure developer productivity and uninterrupted account access if external mail servers experience transient rate-limiting.</li>
             </ul>
           </div>
         </div>

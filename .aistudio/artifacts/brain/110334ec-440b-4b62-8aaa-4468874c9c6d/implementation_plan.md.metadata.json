@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for full-lifecycle warehouse operations (Receipts, Outbound Delivery, Internal Transfers, Physical Count Adjustments), unified login gate with manager-only signup, employee dispatch & credentials dispatch, line-level location stock accounting, and live state transitions.",
-  "updatedAt":  "2026-09-26T06:15:07.752393742Z",
+  "summary":  "Implementation plan for the complete Delivery operation workflow in StockSense IMS, including manager staff assignment, multi-product line selection with live source pick rack on-hand display, Draft -> Ready -> Processing -> Done status machine, automated stock deduction on completion, and insufficient stock blocking with Waiting status.",
+  "updatedAt":  "2026-09-26T09:49:04.540315055Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

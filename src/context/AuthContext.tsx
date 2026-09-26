@@ -11,7 +11,6 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, role?: UserRole) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
-  loginAsDemo: (role: UserRole) => Promise<void>;
   logout: () => void;
   switchRole: (role: UserRole) => void;
   requestOtp: (email: string) => Promise<{ success: boolean; message: string; testOtpCode?: string }>;
@@ -25,7 +24,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(getStoredToken());
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Auto-authenticate on load with default or stored user
+  // Auto-authenticate on load if stored token exists; otherwise user stays null to display the full-screen login gate
   useEffect(() => {
     const initAuth = async () => {
       const storedToken = getStoredToken();
@@ -38,19 +37,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return;
           }
         } catch (_err) {
-          // Fallback if token expired
+          // Token expired or invalid
+          setStoredToken(null);
+          setToken(null);
         }
       }
 
-      // Default demo logged-in user for frictionless initial exploration
-      const defaultUser: User = {
-        id: 1,
-        uid: 'demo_user_1',
-        email: 'manager@stocksense.io',
-        name: 'Alex Morgan',
-        role: 'Inventory Manager',
-      };
-      setUser(defaultUser);
+      // Mandatory full-screen login first
+      setUser(null);
       setLoading(false);
     };
 
@@ -95,17 +89,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const loginAsDemo = async (role: UserRole) => {
-    const demoUser: User = {
-      id: role === 'Inventory Manager' ? 1 : 2,
-      uid: role === 'Inventory Manager' ? 'demo_mgr' : 'demo_staff',
-      email: role === 'Inventory Manager' ? 'manager@stocksense.io' : 'staff@stocksense.io',
-      name: role === 'Inventory Manager' ? 'Alex Morgan' : 'Sam Rivera',
-      role,
-    };
-    setUser(demoUser);
-  };
-
   const logout = () => {
     setUser(null);
     setToken(null);
@@ -135,7 +118,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         loginWithGoogle,
-        loginAsDemo,
         logout,
         switchRole,
         requestOtp,

@@ -1,136 +1,105 @@
-# End-to-End Warehouse Operations, Lifecycle State Machine & Employee Management
+# Delivery Operation Workflow Implementation
 
-A robust, real-world operational engine for **StockSense IMS** featuring authentic multi-step state machines (`Draft` → `Ready` → `Processing` → `Completed`), line-level location assignments, strict stock decrement/increment accounting, employee dispatch with credential delivery, role-based receipt permissions, and an upfront full-screen authentication gate.
+Implement an end-to-end Outbound Delivery Order workflow in StockSense IMS. This enables warehouse managers to create delivery orders, allocate specific products and quantities from source warehouse racks, assign floor operators, and progress the order through a verified four-stage lifecycle (`Draft` ➔ `Ready` ➔ `Processing` ➔ `Done`), automatically decrementing inventory from PostgreSQL upon completion.
 
 ---
 
-### User Review & Critical Decisions
+## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Key decisions confirmed during Phase 1 clarification:
-> - **Mandatory Login Gate**: The application starts at a full-screen unified login portal for both Managers and Warehouse Staff. Public or unauthenticated demo views are disabled.
-> - **Manager-Only Sign Up**: Self-registration is restricted strictly to Managers. Warehouse Staff accounts must be created by an authorized Manager, which dispatches their access credentials.
-> - **Granular Staff Permissions**: Managers can toggle `canCreateReceipts` per employee. When enabled, warehouse staff can independently initiate draft receipt intakes.
-> - **Line-Item Granular Shelving & Picking**: Receipts assign destination locations per line item, and deliveries specify source locations per line item. Stock updates dynamically as items are confirmed rather than in an opaque bulk flip.
+> The following parameters and architectural behaviors have been confirmed:
+
+- **Confirmed Workflow Lifecycle**: Strict four-stage state machine:
+  1. `Draft`: Manager builds the order, selects customer, picks products, quantities, and source shelf/rack locations.
+  2. `Ready`: Manager assigns a registered warehouse staff member (`responsible`) to dispatch the order into the operator's active floor queue.
+  3. `Processing`: Warehouse staff initiates picking on the warehouse floor (picking individual line items with physical bin confirmations).
+  4. `Done`: All lines confirmed or manager validates full order, causing the system to automatically deduct the demanded quantities from the source location's on-hand stock and log immutable audit entries in `stock_ledger`.
+- **Confirmed Insufficient Stock Guard**: If any requested product line exceeds the available on-hand quantity at the source pick location when attempting validation, the system **blocks completion** and automatically flags the operation status as **`Waiting`** (Waiting for Stock Replenishment), preventing negative inventory.
+- **Per-Line Source Location Resolution**: Ensure line-specific pick racks (e.g., `WH/Stock1`, `WH/Rack-A`, `WH/Zone-B`) are directly decremented in `stock_levels` during both line-by-line picking and bulk validation.
 
 ---
 
-### 1. Overview & Core Concept
+## 1. Overview & Core Concept
 
-- **What It Does**: Transforms the operational module from static simulated badges into a live, interactive execution flow:
-  1. **Inbound Receipt Orders**: Manager/permitted staff creates receipt with per-product destination locations. Status moves `Draft` → `Ready` (staff assigned and notified) → `Processing` (staff starts intake) → line-by-line verification and bin shelving (stock increments on shelf confirmation) → `Completed`.
-  2. **Outbound Delivery Orders**: Manager selects customer delivery lines with specific source picking locations and assigns staff. Status moves `Draft` → `Ready` → `Processing` (staff picking) → line-by-line shelf deduction (stock decrements from bin and total) → `Completed`.
-  3. **Internal Transfers**: Products are relocated from one specific storage location/rack to another, updating location-level balances atomically.
-  4. **Stock Adjustments & Physical Counting**: Staff records physical shelf counts; system ledger reconciles discrepancies with automated audit records.
-  5. **Employee Roster & Notification**: Manager creates employees, sets receipt creation rights, generates login credentials with visual email dispatch confirmation, and tracks assigned tasks in real time.
-  6. **Unified Login First Screen**: Dedicated landing login screen with Manager signup toggle and staff login instructions.
-
-- **Target Audience / Persona**:
-  - **Inventory Manager**: Oversees warehouse capacity, creates products/locations, dispatches task assignments to staff, monitors live operational order queues, and manages staff permissions.
-  - **Warehouse Staff**: Floor operators executing task queues (picking lists, intake shelving, bin-to-bin transfers), confirming quantities and shelf placements.
-
-- **Key Value**: Eliminates stock discrepancies with true bin-level inventory math and provides clear accountability across staff assignments.
+- **What It Does**: Provides a dedicated, high-precision outbound delivery workflow (`WH/OUT/xxxx`) for shipping customer goods. Managers specify customer details, choose products from active warehouse storage locations, and assign floor staff. Floor staff receive the order on their terminal, pick items from racks, and mark the order complete, immediately updating stock ledgers and on-hand balances.
+- **Target Audience / Persona**: Warehouse Managers (creation, staff dispatch, stock oversight) and Warehouse Staff (physical order picking and shelf confirmation).
+- **Key Value**: Enforces physical storage accountability, stops out-of-stock fulfillments before dispatch, and guarantees accurate real-time inventory balances.
 
 ---
 
-### 2. User Experience & Visual Design
+## 2. User Experience & Visual Design
 
-#### Key User Flows
-
-1. **Authentication Gate**:
-   - Initial load displays a clean, industrial SaaS login portal (`Cabinet Grotesk` display typography, neutral slate styling).
-   - Unified Sign In: Accepts email/password for either Managers (`manager@stocksense.io`) or Staff (`staff@stocksense.io`).
-   - "Register New Warehouse Manager" mode available; employee signup tab is disallowed (staff are directed to use credentials provided by their manager).
-   - Fast demo role picker for testing without typing.
-
-2. **Manager Operation Dispatch & Monitoring**:
-   - **Receipt Creation**: Select warehouse → select supplier/vendor → add line items with product, quantity, and individual destination shelf/bin location → select assigned staff member. Saves in `Draft`.
-   - **Dispatch to Floor**: Manager reviews order and clicks **Mark as Ready & Assign**. Order moves to `Ready`; assigned employee receives visual notification badge in their queue.
-   - **Delivery Creation**: Add customer delivery lines specifying exact pick location per product.
-
-3. **Staff Floor Execution**:
-   - Staff logs in, sees their dedicated Floor Operations queue categorized by Assigned Inbound, Assigned Picking, and Floor Transfers.
-   - Staff opens assigned receipt in `Ready`, clicks **Start Intake / Process**, transitioning order to `Processing`.
-   - As staff physically verifies and places goods into destination racks, they click **Confirm Shelved** on each line. That specific line changes to `Done`, and stock at that specific location immediately increases!
-   - When all lines are shelved, order automatically transitions to `Completed`.
-   - Outbound picking follows symmetric flow: staff picks item from shelf, confirms quantity picked, stock immediately decrements from source rack and company total.
-
-4. **Employee Management Panel**:
-   - Manager views active team members, their assigned pending tasks, and permissions.
-   - "+ Add Employee" modal captures Name, Email, Warehouse, and `Can Create Receipts` toggle. Upon creation, sends simulated credentials delivery with copyable access keys.
-
-#### Visual Identity & Layout (SaaS & Dashboard)
-- **Palette**: Neutral slate (`#0F172A` background/text tones, `#F8FAFC` card base, `#E2E8F0` hairline dividers), industrial emerald (`#10B981`) for completed/intake, amber (`#F59E0B`) for processing/ready, and indigo (`#6366F1`) for primary dispatch actions.
-- **Zero-Pill Discipline**: Statuses presented as quiet typographic indicators with semantic colored bullet points (`● Draft`, `● Ready`, `● Processing`, `● Completed`), never garish neon candy capsules.
-- **Tabular Figures**: Quantities, location short codes, and timestamps styled with `font-mono tabular-nums`.
+- **Key User Flows**:
+  1. **Manager Creation Flow (`New Delivery Order`)**:
+     - Manager clicks **"New Delivery Order"** in the Operations view (or Outbound Deliveries tab).
+     - Manager selects the Warehouse Facility (e.g. `Central Warehouse`), inputs Customer Name (e.g. `Deco Addict`), Scheduled Date, and default Source Rack.
+     - Under **Product Items & Storage Placement**, manager adds lines. Each line dynamically shows current on-hand stock at the chosen rack: `Available: 45 Units`. If a requested quantity exceeds available stock, a high-contrast inline amber/red warning appears immediately.
+     - Manager selects the designated **Warehouse Staff Operator** directly from the creation modal or saves as `Draft`.
+  2. **Staff Assignment & Dispatch Flow**:
+     - In `Draft` status, the manager clicks **"Assign Staff & Mark as Ready"**. A dialog lists registered floor staff along with their current active task count.
+     - Selecting a worker transitions the order to **`Ready`** and sets the `responsible` metadata.
+  3. **Floor Execution & Picking Flow (`Processing`)**:
+     - Floor operator clicks **"Start Order Picking (Processing)"**.
+     - Operator picks items line by line, clicking **"Pick from Bin"** as each shelf rack is verified.
+     - Alternatively, managers can click **"Validate All Lines & Commit to Stock"**.
+  4. **Automatic Stock Decrement (`Done`)**:
+     - When all lines are picked or validated, PostgreSQL commits the exact stock decrements to `stock_levels` for the source locations.
+     - Each line creates an entry in `stock_ledger` with `operationType: delivery`, recording `fromLocation` (rack name), `toLocation` (Customer), and timestamp.
+     - If available stock is insufficient, the operation halts and transitions to `waiting` with a descriptive alert message: *"Insufficient stock for [Product]. On hand: X, Demanded: Y. Operation set to 'Waiting'."*
+- **Visual Design (SaaS High-Density Anti-Slop)**:
+  - Tabular monospace numbers (`font-mono tabular-nums`) for demanded vs. picked quantities.
+  - Crisp status pipeline banner (`Draft` ➔ `Ready` ➔ `Processing` ➔ `Done` / `Waiting`).
+  - Printable **Delivery Dispatch Voucher** / Packing Slip accessible with 1 click.
 
 ---
 
-### 3. Key Product Decisions & Trade-Offs
+## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Line-by-Line Execution vs. All-or-Nothing Finalization**
-  - *Chosen Approach*: Line items track individual `status` (`pending` → `done`) and `doneQty`. Location stock updates immediately as each line is confirmed shelved or picked.
-  - *Why*: Reflects real-world warehouse operations where large shipments take hours to rack; inventory is made available as soon as it hits the bin.
-  - *Alternatives Considered*: Single validation button updating all items at once. Rejected because it causes phantom out-of-stocks during long receiving shifts.
-
-- **Decision 2: Client/Server Reactive State Architecture**
-  - *Chosen Approach*: Centralized reactive state store connected to the backend API with optimistic local updates, persistent ledger records, and instant notification indicators.
-  - *Why*: Provides snappy, zero-latency feedback for warehouse workers using handheld or floor tablets while maintaining database integrity.
-
-- **Decision 3: Dedicated Staff Receipt Permission Gate**
-  - *Chosen Approach*: `canCreateReceipts` boolean attribute on employee records, verified both in the UI view controls and API handler.
-  - *Why*: Gives managers strict control over procurement intake while allowing autonomous floor staff when designated.
+- **Decision 1: Per-Line Location Storage & Deductions**:
+  - *Chosen Approach*: Store line-level source locations in operation metadata (`lineLocations`) and query both line-specific location IDs and parent operation location IDs.
+  - *Why*: Large warehouses frequently pick different items for a single customer order from different aisles or racks.
+- **Decision 2: Atomic State Machine & Stock Decrement Guard**:
+  - *Chosen Approach*: In `queries.ts`, ensure `validateOperation` and `confirmOperationLine` use exact stock verification prior to updating `stock_levels`.
+  - *Why*: Eliminates race conditions and prevents negative stock balances in PostgreSQL.
 
 ---
 
-### 4. Technical Architecture & Data Strategy
+## 4. Technical Architecture & Data Strategy
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        FULL-SCREEN LOGIN GATE                          │
-│   Unified Sign-In  │  Manager Self-Signup  │  Role Quick-Selector     │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Authenticated User Context
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                       STOCKSENSE IMS WORKSPACE                         │
-│                                                                        │
-│   ┌──────────────────────────────┐  ┌──────────────────────────────┐   │
-│   │     INVENTORY MANAGER        │  │       WAREHOUSE STAFF        │   │
-│   │  • Full Dashboard & Reports  │  │  • Floor Ops Queue           │   │
-│   │  • Products & Shelves Setup  │  │  • Assigned Intake Shelving  │   │
-│   │  • Dispatch Order Creation   │  │  • Assigned Bin Picking      │   │
-│   │  • Staff & Permission Mgmt   │  │  • Rack-to-Rack Relocation   │   │
-│   └──────────────┬───────────────┘  └──────────────┬───────────────┘   │
-└──────────────────┼─────────────────────────────────┼───────────────────┘
-                   │                                 │
-                   ▼                                 ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                   REAL-WORLD STATE ENGINE & LEDGER                     │
-│                                                                        │
-│    Draft ───(Dispatch)───► Ready ───(Staff Start)───► Processing       │
-│                                                              │         │
-│                                                (Line-by-Line Shelve)   │
-│                                                              ▼         │
-│     Completed ◄──────(All Lines Verified)───────── Line Items Done     │
-│                                                                        │
-│    * Immediate Location Stock Accounting (+ Inbound / - Outbound)      │
-│    * Immutable Stock Movement Audit Trail Entries                      │
-└────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                   StockSense Client                    │
+│   (OperationsView.tsx • Outbound Deliveries Tab)       │
+└──────────────────────────┬─────────────────────────────┘
+                           │ HTTP POST / PUT
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│                   Express API Server                   │
+│   • POST /api/operations (create delivery draft)       │
+│   • PUT  /api/operations/:id/status (assign & ready)   │
+│   • POST /api/operations/:id/lines/:lid/confirm        │
+│   • POST /api/operations/:id/validate (auto-decrement) │
+└──────────────────────────┬─────────────────────────────┘
+                           │
+             ┌─────────────┴─────────────┐
+             ▼                           ▼
+┌──────────────────────────┐  ┌──────────────────────────┐
+│   PostgreSQL Database    │  │   Stock Level Engine     │
+│  • operations (delivery) │  │ • verify onHand >= qty   │
+│  • operation_lines       │  │ • onHand = onHand - qty  │
+│  • stock_ledger (audit)  │  │ • fallback to 'waiting'  │
+└──────────────────────────┘  └──────────────────────────┘
 ```
 
-#### State Transition Matrix
-
-| Current State | Permitted Actions | Target State | Stock Impact | Permitted Roles |
-| :--- | :--- | :--- | :--- | :--- |
-| **Draft** | Edit items, assign staff, cancel | `Ready` or `Canceled` | None | Manager (or Staff if authorized) |
-| **Ready** | Staff accepts/starts task | `Processing` | None | Assigned Staff / Manager |
-| **Processing** | Shelve/Pick line item | `Processing` (line `done`) | $\pm$ Line Qty on Shelf & Total | Assigned Staff / Manager |
-| **Processing** | Finalize when all lines done | `Completed` | Final audit ledger logged | Automatic / Staff / Manager |
-| **Canceled** | Void order | `Canceled` | Reverses any partial allocations | Manager |
-
-#### Verification & Quality Gates
-1. Run `compile_applet` and `lint_applet` to ensure zero compilation or typing regressions.
-2. Verify interactive state machine: Create draft receipt → Assign staff → Switch to Staff view → View notification → Start processing → Shelve line item → Confirm location on-hand increase → Verify completed order in Move History.
-3. Verify outbound picking: Create delivery with designated source bin → Staff picks item → Confirm location on-hand decrease.
-4. Verify staff permission toggle: Toggle receipt creation permission off/on and verify button visibility for employee.
+### Components to Update:
+1. **Backend Queries (`src/db/queries.ts`)**:
+   - Verify that `validateOperation` for `delivery` respects per-line `sourceLocationId` (falling back to `op.sourceLocationId`).
+   - Ensure accurate stock check and automatic transition to `waiting` if stock is deficient.
+   - Verify `confirmOperationLine` properly checks line-specific stock and marks allComplete when final item is picked.
+2. **Operations View (`src/views/OperationsView.tsx`)**:
+   - Enhance the New Delivery Modal to display live on-hand quantity per rack location in real-time as the manager selects products and pick locations.
+   - Wire the direct staff selector into the New Delivery creation modal so managers can create directly in `Ready` or `Draft` state.
+   - Ensure clear UI actions for `Draft` ➔ `Ready` (Assign Staff) ➔ `Processing` (Start Picking) ➔ `Done` (Validate & Decrement).
+   - Display a distinct `Waiting` state badge with a "Re-check Available Stock" button when replenished.
+3. **Verification**:
+   - Verify compilation with `lint_applet` and `compile_applet`.

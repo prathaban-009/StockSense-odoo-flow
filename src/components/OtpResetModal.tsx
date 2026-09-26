@@ -126,12 +126,12 @@ export const OtpResetModal: React.FC<OtpResetModalProps> = ({ isOpen, onClose, o
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-md border border-[#E2E8F0] dark:border-slate-700 text-slate-600 dark:text-slate-400 flex items-start gap-2">
-                <Terminal className="w-3.5 h-3.5 mt-0.5 text-[#1E40AF] dark:text-blue-400 shrink-0" />
+              <div className="p-3 bg-blue-50/50 dark:bg-blue-950/30 rounded-md border border-blue-200 dark:border-blue-900 text-slate-600 dark:text-slate-400 flex items-start gap-2">
+                <Mail className="w-3.5 h-3.5 mt-0.5 text-[#1E40AF] dark:text-blue-400 shrink-0" />
                 <div>
-                  <span className="font-semibold text-slate-900 dark:text-white">Terminal Mode:</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">Google SMTP Outbound Delivery:</span>
                   <p className="mt-0.5">
-                    The OTP code will be logged directly to the server terminal and displayed in the verification screen for developer testing.
+                    Your 6-digit passcode will be dispatched via Google SMTP (<span className="font-mono text-[#1E40AF] dark:text-blue-400">prathaban009@gmail.com</span>) directly to your inbox. A test code fallback is also provided for instant local preview.
                   </p>
                 </div>
               </div>
@@ -157,13 +157,13 @@ export const OtpResetModal: React.FC<OtpResetModalProps> = ({ isOpen, onClose, o
 
           {step === 'verify' && (
             <form onSubmit={handleVerifyOtp} className="space-y-3.5">
-              {/* Simulated OTP Alert Banner */}
+              {/* Google SMTP Dispatched OTP Banner */}
               {simulatedOtp && (
                 <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-850 rounded-md">
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <Terminal className="w-3.5 h-3.5 text-[#1E40AF] dark:text-blue-400" />
-                      Server Console Code:
+                      <Mail className="w-3.5 h-3.5 text-[#1E40AF] dark:text-blue-400" />
+                      Google SMTP Dispatched (Preview Fallback Active):
                     </span>
                     <button
                       type="button"

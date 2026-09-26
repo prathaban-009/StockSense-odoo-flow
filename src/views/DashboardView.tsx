@@ -72,11 +72,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'done':
-        return 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+        return 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 font-semibold';
+      case 'processing':
+        return 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800 font-semibold';
       case 'ready':
-        return 'bg-blue-50 text-[#1E40AF] dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800';
+        return 'bg-blue-50 text-[#1E40AF] dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800 font-semibold';
       case 'waiting':
-        return 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+        return 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700';
       case 'canceled':
         return 'bg-rose-50 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border-rose-200 dark:border-rose-800';
       default:
@@ -388,7 +390,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {/* Status Pills */}
             <div className="flex flex-wrap items-center gap-1 text-xs">
               <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1">Status:</span>
-              {['all', 'draft', 'waiting', 'ready', 'done'].map((st) => (
+              {['all', 'draft', 'ready', 'processing', 'done'].map((st) => (
                 <button
                   key={st}
                   onClick={() => setStatusFilter(st)}
@@ -398,7 +400,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                 >
-                  {st}
+                  {st === 'done' ? 'Completed' : st}
                 </button>
               ))}
             </div>
@@ -423,8 +425,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <tbody className="divide-y divide-[#E2E8F0] dark:divide-slate-800/80 text-slate-700 dark:text-slate-300">
               {filteredOperations.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-slate-400">
-                    No matching operations found for current filters.
+                  <td colSpan={8} className="py-14 text-center">
+                    <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                      <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-2.5">
+                        <Package className="w-5 h-5" />
+                      </div>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white">
+                        {operations.length === 0 ? 'No Active Operations' : 'No Matching Operations'}
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 mb-3">
+                        {operations.length === 0
+                          ? 'Your operational queue is currently empty. Start by logging an inbound vendor receipt or customer delivery.'
+                          : 'No operations match your current search query or status filter.'}
+                      </p>
+                      {operations.length === 0 && (
+                        <button
+                          onClick={() => onNavigateToOperations('receipt')}
+                          className="px-3 py-1.5 bg-[#1E40AF] hover:bg-[#1D4ED8] text-white rounded text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          + Create Inbound Receipt
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (

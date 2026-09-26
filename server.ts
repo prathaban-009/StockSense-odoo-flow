@@ -5,6 +5,8 @@ import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import {
+  clearAllDemoData,
+  confirmOperationLine,
   createCategory,
   createLocation,
   createOperation,
@@ -28,8 +30,20 @@ import {
   validateOperation,
   verifyAndMarkOtp,
 } from './src/db/queries.ts';
+import {
+  createNewEmployee,
+  getAllEmployeesWithStats,
+  getEmployeeMeta,
+  setEmployeeMeta,
+} from './src/db/employeeStore.ts';
 import { createLocalToken, requireAuth, AuthRequest } from './src/middleware/auth.ts';
 import { adminAuth } from './src/lib/firebase-admin.ts';
+import {
+  verifySmtpConnection,
+  sendOtpEmail,
+  sendLowStockAlertEmail,
+  sendTestDiagnosticEmail,
+} from './src/services/mailer.ts';
 
 dotenv.config();
 
@@ -117,6 +131,8 @@ async function startServer() {
         role: user.role,
       });
 
+      const meta = getEmployeeMeta(user.email);
+
       res.json({
         user: {
           id: user.id,
@@ -124,6 +140,8 @@ async function startServer() {
           email: user.email,
           name: user.name,
           role: user.role,
+          canCreateReceipts: meta.canCreateReceipts ?? (user.role === 'Inventory Manager'),
+          warehouseId: meta.warehouseId || 1,
         },
         token,
       });
@@ -189,21 +207,25 @@ async function startServer() {
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       await saveOtp(email, otpCode, 10);
 
-      // PRINT TO CONSOLE AS SPECIFIED BY USER
       console.log('\n=============================================================');
-      console.log('📬 [EMAIL / OTP SERVICE SIMULATION]');
+      console.log('📬 [EMAIL / OTP SERVICE - GOOGLE SMTP TRANSPORT]');
       console.log(`👤 Recipient: ${email}`);
       console.log(`🔐 OTP Code:  ${otpCode}`);
       console.log(`⏱️  Validity:  10 minutes`);
-      console.log('📦 Subject:   Your StockSense IMS Password Reset OTP');
-      console.log('💡 Note:      In production, this code will be dispatched via');
-      console.log('              configured Mail Provider (Resend / SendGrid / AWS SES)');
-      console.log('=============================================================\n');
+      console.log('📦 Subject:   Your StockSense IMS Password Reset Passcode');
+      console.log('=============================================================');
+
+      // Dispatch via Google SMTP
+      const mailResult = await sendOtpEmail(email, otpCode);
 
       res.json({
         success: true,
-        message: `OTP sent to ${email}. (Logged to server console & available for instant preview test)`,
-        // Returned testOtpCode allows direct simulation & seamless preview testing without opening server logs!
+        message: mailResult.deliveredViaSmtp
+          ? `Verification OTP sent to ${email} via Google SMTP.`
+          : `OTP generated for ${email}. (Google SMTP delivery fallback active; test OTP available for preview testing)`,
+        deliveredViaSmtp: mailResult.deliveredViaSmtp,
+        smtpError: mailResult.error || null,
+        // testOtpCode fallback provided per user request to prevent lockout during test/dev
         testOtpCode: otpCode,
         recipient: email,
         expiresInMinutes: 10,
@@ -247,7 +269,15 @@ async function startServer() {
       if (!user && req.user.email) {
         user = await getUserByEmail(req.user.email);
       }
-      res.json({ user });
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      const meta = getEmployeeMeta(user.email);
+      res.json({
+        user: {
+          ...user,
+          canCreateReceipts: meta.canCreateReceipts ?? (user.role === 'Inventory Manager'),
+          warehouseId: meta.warehouseId || 1,
+        },
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -379,16 +409,19 @@ async function startServer() {
     }
   });
 
-  app.put('/api/operations/:id/status', async (req, res) => {
+  const handleStatusChange = async (req: express.Request, res: express.Response) => {
     try {
       const id = parseInt(req.params.id, 10);
-      const { status } = req.body;
-      const updated = await updateOperationStatus(id, status);
+      const { status, assignedStaff } = req.body;
+      const updated = await updateOperationStatus(id, status, assignedStaff);
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
-  });
+  };
+
+  app.put('/api/operations/:id/status', handleStatusChange);
+  app.patch('/api/operations/:id/status', handleStatusChange);
 
   app.post('/api/operations/:id/validate', async (req, res) => {
     try {
@@ -397,6 +430,114 @@ async function startServer() {
       res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Confirm single line item (shelve, pick, or move)
+  app.post('/api/operations/:id/lines/:lineId/confirm', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const lineId = parseInt(req.params.lineId, 10);
+      const result = await confirmOperationLine(id, lineId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ---------------- EMPLOYEE MANAGEMENT API ----------------
+  app.get('/api/employees', async (_req, res) => {
+    try {
+      const emps = await getAllEmployeesWithStats();
+      res.json(emps);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/employees', async (req, res) => {
+    try {
+      const result = await createNewEmployee(req.body);
+      res.status(201).json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put('/api/employees/:email/permissions', async (req, res) => {
+    try {
+      const { email } = req.params;
+      const { canCreateReceipts, warehouseId } = req.body;
+      const updated = setEmployeeMeta(email, { canCreateReceipts, warehouseId });
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ---------------- GOOGLE SMTP & MAIL DISPATCH API ----------------
+  // Get SMTP connection status
+  app.get('/api/mail/status', async (_req, res) => {
+    try {
+      const status = await verifySmtpConnection();
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to check SMTP status' });
+    }
+  });
+
+  // Test send an email through Google SMTP
+  app.post('/api/mail/test-send', async (req, res) => {
+    try {
+      const { recipient } = req.body;
+      if (!recipient) {
+        return res.status(400).json({ error: 'Recipient email is required' });
+      }
+
+      const result = await sendTestDiagnosticEmail(recipient);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to send test email' });
+    }
+  });
+
+  // Dispatch low stock reorder alert to manager
+  app.post('/api/mail/send-low-stock-alert', async (req, res) => {
+    try {
+      const recipient = req.body.recipient || process.env.SMTP_USERNAME || 'prathaban009@gmail.com';
+      const allProducts = await getAllProducts();
+      const lowStockItems = allProducts.filter((p) => p.onHand <= (p.minReorderLevel ?? 10));
+
+      if (lowStockItems.length === 0) {
+        return res.json({
+          success: true,
+          message: 'All inventory items are currently above safety stock levels. No reorder alert required.',
+          count: 0,
+        });
+      }
+
+      const mailResult = await sendLowStockAlertEmail(
+        recipient,
+        lowStockItems.map((p) => ({
+          name: p.name,
+          sku: p.sku,
+          onHand: p.onHand,
+          minReorderLevel: p.minReorderLevel ?? 10,
+          reorderQty: p.reorderQty ?? 20,
+          categoryName: p.categoryName,
+        }))
+      );
+
+      res.json({
+        ...mailResult,
+        itemCount: lowStockItems.length,
+        recipient,
+        message: mailResult.deliveredViaSmtp
+          ? `Dispatched low-stock reorder alert for ${lowStockItems.length} items to ${recipient} via Google SMTP.`
+          : `Failed to deliver low-stock alert via Google SMTP: ${mailResult.error}`,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'Failed to send low stock alert' });
     }
   });
 
@@ -453,6 +594,17 @@ async function startServer() {
         },
       ],
     });
+  });
+
+  // ---------------- SYSTEM DATA MANAGEMENT API ----------------
+  app.post('/api/system/reset-demo-data', async (_req, res) => {
+    try {
+      const result = await clearAllDemoData();
+      res.json(result);
+    } catch (error: any) {
+      console.error('Reset demo data failed:', error);
+      res.status(500).json({ error: error.message || 'Failed to reset demo data' });
+    }
   });
 
   // Mount Vite development middlewares in dev mode
