@@ -1,0 +1,6 @@
+{
+  "name": "StockSense - Modular Inventory Management System",
+  "description": "Streamlined inventory management system for tracking incoming receipts, delivery orders, stock movements, and multi-warehouse operations with PostgreSQL persistence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

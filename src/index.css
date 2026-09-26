@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --brand-primary: #1E40AF;
+    --brand-primary-hover: #1D4ED8;
+    --brand-sidebar-dark: #1E293B;
+    --brand-bg-light: #F8FAFC;
+    --brand-bg-dark: #020617;
+    --brand-border-light: #E2E8F0;
+    --brand-border-dark: #1E293B;
+  }
+
+  body {
+    background-color: var(--brand-bg-light);
+    color: #0F172A;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .dark body {
+    background-color: var(--brand-bg-dark);
+    color: #F8FAFC;
+  }
+}
+
+/* Supply chain enterprise scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
